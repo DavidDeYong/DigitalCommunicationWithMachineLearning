@@ -1,0 +1,9 @@
+{
+  "clasificador": "Random Forest",
+  "fecha": "2026-02-20 18:41:32",
+  "params": {
+    "max_depth": 6,
+    "n_estimators": 200
+  },
+  "cv_accuracy": 0.9638
+}
