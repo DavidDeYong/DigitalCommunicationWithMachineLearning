@@ -4,12 +4,15 @@ graficas/graficas.py
 Visualizaciones del benchmark unificado.
 
 Figuras generadas:
-  1. curva_ber_principal()    — BER vs Eb/N0 (escala log completa)
-  2. curva_ber_zoom()         — BER vs Eb/N0 (zoom región útil)
-  3. grafica_degradacion()    — degradación en dB respecto a Bayes (NUEVA)
-  4. tabla_metricas()         — tabla visual de métricas comparativas
-  5. regiones_decision()      — regiones de decisión en plano IQ
-  6. historial_loss()         — curvas de pérdida de redes neuronales
+  1. curva_ber_principal()          — BER vs Eb/N0 (escala log completa)
+  2. curva_ber_zoom()               — BER vs Eb/N0 (zoom región útil)
+  3. grafica_degradacion()          — degradación en dB respecto a Bayes
+  4. tabla_metricas()               — tabla visual de métricas comparativas
+  5. regiones_decision()            — regiones de decisión en plano IQ
+  6. historial_loss()               — curvas de pérdida de redes neuronales
+  7. histograma_simbolos()          — histograma completo pre/post scrambling
+  8. histograma_articulo_pre()      — histograma minimalista PRE scrambling (artículo)
+  9. histograma_articulo_post()     — histograma minimalista POST scrambling (artículo)
 """
 
 import numpy as np
@@ -31,7 +34,7 @@ _COLORES = {
     'Random Forest' : '#9C27B0',
     'MLP'           : '#00BCD4',
     'Red Profunda'  : '#F44336',
-    'Teorica'       : '#000000',
+    'Teorica'       : '#AAAAAA',   # ← gris claro (referencia discreta)
 }
 
 _MARKERS = {
@@ -76,9 +79,10 @@ def _separar_confiable(reg):
 # ---------------------------------------------------------------------------
 def _graficar_ber_en_ax(ax, registros, Eb_N0_fino, ber_teo_fino):
     """Dibuja la curva teórica y todas las curvas de clasificadores en un eje."""
+    # Curva teórica: gris claro, línea más delgada → actúa como referencia discreta
     ax.semilogy(Eb_N0_fino, ber_teo_fino,
-                color=_COLORES['Teorica'], linewidth=2.5,
-                linestyle='-', label='BER Teorica 16-QAM', zorder=10)
+                color=_COLORES['Teorica'], linewidth=1.8,
+                linestyle='-', label='BER Teórica 16-QAM', zorder=5)
 
     for reg in registros:
         color  = _color(reg['nombre'])
@@ -117,7 +121,7 @@ def curva_ber_principal(registros, guardar=False, dir_resultados="resultados/"):
     ax.set_title('BER vs $E_b/N_0$ — Clasificadores ML para 16-QAM\n'
                  'Canal AWGN — Protocolo de entrenamiento realista', fontsize=12)
     fig.text(0.5, -0.02,
-             'Marcador vacio (···): estadistica insuficiente (<100 errores).',
+             'Marcador vacío (···): estadística insuficiente (<100 errores).',
              ha='center', fontsize=8.5, color='dimgray', style='italic')
     plt.tight_layout()
     if guardar:
@@ -139,10 +143,10 @@ def curva_ber_zoom(registros, guardar=False, dir_resultados="resultados/"):
     _graficar_ber_en_ax(ax, registros, Eb_N0_fino, ber_teo)
     ax.set_ylim([1e-5, 5e-1])
     ax.set_xlim([Eb_N0_min - 0.5, Eb_N0_max + 0.5])
-    ax.set_title('BER vs $E_b/N_0$ — Zoom region de interes\n'
+    ax.set_title('BER vs $E_b/N_0$ — Zoom región de interés\n'
                  'Canal AWGN — Protocolo de entrenamiento realista', fontsize=12)
     fig.text(0.5, -0.02,
-             'Marcador vacio (···): estadistica insuficiente (<100 errores).',
+             'Marcador vacío (···): estadística insuficiente (<100 errores).',
              ha='center', fontsize=8.5, color='dimgray', style='italic')
     plt.tight_layout()
     if guardar:
@@ -151,7 +155,7 @@ def curva_ber_zoom(registros, guardar=False, dir_resultados="resultados/"):
 
 
 # ---------------------------------------------------------------------------
-# 3. Gráfica de degradación (NUEVA)
+# 3. Gráfica de degradación
 # ---------------------------------------------------------------------------
 def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
     """
@@ -164,16 +168,10 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
 
     Un valor de 0 dB significa rendimiento igual al Bayesiano.
     Un valor positivo indica cuántos dB extra se necesitan (peor rendimiento).
-
-    Esta representación es especialmente útil cuando las curvas BER son
-    visualmente muy similares: pequeñas diferencias en dB son claramente
-    visibles aquí aunque no lo sean en la escala logarítmica de BER.
     """
-    # Curva teórica densa para interpolar Eb/N0 a partir de BER objetivo
     Eb_N0_denso = np.linspace(-2, 20, 5000)
     ber_teo_den = ber_teorica_16qam(Eb_N0_denso)
 
-    # Identificar el registro Bayes (referencia)
     reg_bayes = next((r for r in registros
                       if 'bayes' in r['nombre'].lower()), None)
     if reg_bayes is None:
@@ -181,8 +179,6 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
               "Gráfica de degradación omitida.")
         return
 
-    # Rango de BER para el que tiene sentido calcular degradación
-    # (solo puntos confiables de Bayes)
     x_b = np.array(reg_bayes['Eb_N0_dB'])
     y_b = np.array(reg_bayes['ber'], dtype=float)
     c_b = np.array(reg_bayes.get('confiable', [True]*len(x_b)), dtype=bool)
@@ -192,27 +188,23 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
         print("  [Graficas] Datos insuficientes para gráfica de degradación.")
         return
 
-    # BER targets: puntos confiables de Bayes, en escala log uniforme
-    ber_min = max(ber_validas.min(), 1e-6)
-    ber_max = ber_validas.max()
+    ber_min     = max(ber_validas.min(), 1e-6)
+    ber_max     = ber_validas.max()
     ber_targets = np.logspace(np.log10(ber_min), np.log10(ber_max), 200)
 
-    # Función que dado una BER devuelve el Eb/N0 teórico necesario
-    # (interpolación inversa sobre la curva teórica densa)
     try:
         interp_teo = interp1d(ber_teo_den[::-1], Eb_N0_denso[::-1],
                               kind='linear', bounds_error=False,
                               fill_value=(Eb_N0_denso[-1], Eb_N0_denso[0]))
         EbN0_bayes_teo = interp_teo(ber_targets)
     except Exception:
-        print("  [Graficas] Error en interpolacion para degradacion.")
+        print("  [Graficas] Error en interpolación para degradación.")
         return
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    # Línea de referencia en 0 dB (Bayes teórico)
-    ax.axhline(0, color=_COLORES['Teorica'], linewidth=2.0,
-               linestyle='-', label='Bayes teorico (referencia 0 dB)', zorder=10)
+    ax.axhline(0, color=_COLORES['Teorica'], linewidth=1.8,
+               linestyle='-', label='Bayes teórico (referencia 0 dB)', zorder=10)
 
     clf_sin_bayes = [r for r in registros if 'bayes' not in r['nombre'].lower()]
 
@@ -223,7 +215,6 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
         color  = _color(reg['nombre'])
         marker = _marker(reg['nombre'])
 
-        # Solo usar puntos confiables con BER > 0
         mask = c & (y > 0)
         if mask.sum() < 2:
             continue
@@ -231,7 +222,6 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
         x_ok = x[mask]
         y_ok = y[mask]
 
-        # Para cada BER target, interpolar Eb/N0 del clasificador
         try:
             interp_clf = interp1d(y_ok[::-1], x_ok[::-1],
                                   kind='linear', bounds_error=False,
@@ -242,7 +232,6 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
 
         degradacion = EbN0_clf - EbN0_bayes_teo
 
-        # Filtrar NaN y valores fuera del rango de datos
         mask_plot = np.isfinite(degradacion) & \
                     (ber_targets >= y_ok.min() * 0.9) & \
                     (ber_targets <= y_ok.max() * 1.1)
@@ -253,28 +242,26 @@ def grafica_degradacion(registros, guardar=False, dir_resultados="resultados/"):
         ax.plot(ber_targets[mask_plot], degradacion[mask_plot],
                 color=color, linewidth=1.8, label=reg['nombre'])
 
-        # Marcar el punto de máxima degradación
         idx_max = np.argmax(np.abs(degradacion[mask_plot]))
         bx = ber_targets[mask_plot][idx_max]
         dy = degradacion[mask_plot][idx_max]
         ax.plot(bx, dy, marker=marker, color=color, markersize=8, zorder=5)
 
     ax.set_xscale('log')
-    ax.invert_xaxis()   # BER decrece de izquierda a derecha (SNR crece)
+    ax.invert_xaxis()
     ax.set_xlabel(r'BER objetivo ($P_b$)', fontsize=12)
-    ax.set_ylabel(r'Degradacion respecto a Bayes (dB)', fontsize=12)
-    ax.set_title('Degradacion en $E_b/N_0$ respecto al detector Bayesiano\n'
-                 'Positivo = mas dB necesarios para la misma BER', fontsize=12)
+    ax.set_ylabel(r'Degradación respecto a Bayes (dB)', fontsize=12)
+    ax.set_title('Degradación en $E_b/N_0$ respecto al detector Bayesiano\n'
+                 'Positivo = más dB necesarios para la misma BER', fontsize=12)
     ax.grid(True, which='both', linestyle='--', alpha=0.5)
     ax.legend(fontsize=9, loc='upper right')
     ax.axhspan(0, ax.get_ylim()[1] if ax.get_ylim()[1] > 0 else 3,
                alpha=0.04, color='red', label='_nolegend_')
 
-    # Nota explicativa
     fig.text(0.5, -0.02,
-             'Degradacion = Eb/N0 necesario por el clasificador ML menos Eb/N0 del Bayes teorico '
+             'Degradación = Eb/N0 necesario por el clasificador ML menos Eb/N0 del Bayes teórico '
              'para la misma BER.\n'
-             '0 dB = rendimiento identico al optimo. '
+             '0 dB = rendimiento idéntico al óptimo. '
              'Valores mayores indican mayor consumo de potencia para igual calidad.',
              ha='center', fontsize=8.5, color='dimgray', style='italic')
     plt.tight_layout()
@@ -297,7 +284,7 @@ def tabla_metricas(registros, guardar=False, dir_resultados="resultados/"):
     ax.axis('off')
 
     columnas = ['Clasificador', 'BER media', 'Accuracy\nmedia',
-                'T. entrenamiento\n(s, promedio)', 'T. inferencia\n(us/simbolo)']
+                'T. entrenamiento\n(s, promedio)', 'T. inferencia\n(µs/símbolo)']
     filas = []
     for i, nombre in enumerate(nombres):
         ber_str = f"{ber_media[i]:.3e}" if ber_media[i] > 0 else "< 10-5"
@@ -370,7 +357,7 @@ def regiones_decision(clasificadores, Eb_N0_dB, A=1.0,
     for j in range(i + 1, len(axes)):
         axes[j].set_visible(False)
 
-    plt.suptitle(f'Regiones de decision — $E_b/N_0$ = {Eb_N0_dB} dB',
+    plt.suptitle(f'Regiones de decisión — $E_b/N_0$ = {Eb_N0_dB} dB',
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
     if guardar:
@@ -387,7 +374,7 @@ def historial_loss(redes, Eb_N0_dB, guardar=False, dir_resultados="resultados/")
         if hasattr(red, '_historial_loss') and red._historial_loss:
             ax.plot(red._historial_loss, label=red.nombre,
                     color=_color(red.nombre), linewidth=1.8)
-    ax.set_xlabel('Epoca', fontsize=12)
+    ax.set_xlabel('Época', fontsize=12)
     ax.set_ylabel('Cross-Entropy Loss', fontsize=12)
     ax.set_title(f'Convergencia del entrenamiento — $E_b/N_0$ = {Eb_N0_dB} dB',
                  fontsize=12)
@@ -400,7 +387,7 @@ def historial_loss(redes, Eb_N0_dB, guardar=False, dir_resultados="resultados/")
 
 
 # ---------------------------------------------------------------------------
-# 7. Histograma de símbolos transmitidos
+# 7. Histograma de símbolos transmitidos (versión completa — diagnóstico)
 # ---------------------------------------------------------------------------
 def histograma_simbolos(fuente_dict, A=1.0, n_simbolos=50_000,
                         usar_scrambling=False, scrambling_seed=42,
@@ -412,10 +399,6 @@ def histograma_simbolos(fuente_dict, A=1.0, n_simbolos=50_000,
     Genera SIEMPRE la figura con la distribución ANTES del scrambling
     (fuente de voz cruda). Si usar_scrambling=True, genera además la
     figura DESPUÉS del scrambling (condición real del benchmark).
-
-    Mostrar ambas permite argumentar en el artículo:
-      - La fuente de voz + Ley µ produce bits no equiprobables (Figura A)
-      - El scrambling corrige esto, validando el supuesto del Bayesiano (Figura B)
     """
     from canal.modulador import modular, simbolos_a_etiquetas, _TODOS_IQ
     from fuente.fuente   import extraer_segmento
@@ -433,118 +416,183 @@ def histograma_simbolos(fuente_dict, A=1.0, n_simbolos=50_000,
         chi2, pval = chisquare(counts)
         return freqs, desvios, counts, p1_bits, chi2, pval
 
-    def _graficar(bits, titulo, nombre_archivo):
-        freqs, desvios, counts, p1_bits, chi2, pval = _analizar(bits)
-        freq_uni = 1.0 / 16
-        iq_todos = A * _TODOS_IQ
-        p1_global = float(bits.mean())
-
-        fig = plt.figure(figsize=(16, 5))
-        gs  = fig.add_gridspec(1, 3, wspace=0.35)
-        ax1 = fig.add_subplot(gs[0])
-        ax2 = fig.add_subplot(gs[1])
-        ax3 = fig.add_subplot(gs[2])
-
-        # (a) Histograma de frecuencias de símbolos
-        colores_hist = ['#E53935' if abs(d) > 10 else
-                        '#FB8C00' if abs(d) > 5  else
-                        '#43A047' for d in desvios]
-        ax1.bar(range(16), freqs * 100, color=colores_hist,
-                edgecolor='white', linewidth=0.5)
-        ax1.axhline(freq_uni * 100, color='black', linewidth=1.5,
-                    linestyle='--', label=f'Equiprobable ({freq_uni*100:.2f}%)')
-        for i, (f, d) in enumerate(zip(freqs, desvios)):
-            if abs(d) > 5:
-                ax1.annotate(f'{d:+.1f}%', xy=(i, f*100 + 0.1),
-                             ha='center', fontsize=7, color='dimgray')
-        ax1.set_xlabel('Símbolo (índice 0–15)', fontsize=11)
-        ax1.set_ylabel('Frecuencia relativa (%)', fontsize=11)
-        ax1.set_title('(a) Distribución de símbolos', fontsize=11)
-        ax1.set_xticks(range(16))
-        ax1.legend(fontsize=9)
-        ax1.grid(True, axis='y', linestyle='--', alpha=0.5)
-        color_stat = '#E53935' if pval < 0.05 else '#43A047'
-        ax1.text(0.02, 0.97,
-                 f'χ²={chi2:.1f}  p={pval:.4f}\n'
-                 f'{"No equiprobable" if pval < 0.05 else "Equiprobable"} (α=0.05)',
-                 transform=ax1.transAxes, fontsize=8.5, va='top', color=color_stat,
-                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-
-        # (b) Constelación coloreada por frecuencia
-        sc = ax2.scatter(iq_todos[:, 0], iq_todos[:, 1],
-                         c=freqs * 100, cmap='RdYlGn_r', s=400,
-                         edgecolors='black', linewidths=0.8,
-                         vmin=(freq_uni*100)*0.7, vmax=(freq_uni*100)*1.3, zorder=5)
-        cb = plt.colorbar(sc, ax=ax2, fraction=0.046, pad=0.04)
-        cb.set_label('Frecuencia (%)', fontsize=9)
-        cb.ax.axhline(freq_uni * 100, color='black', linewidth=1.5, linestyle='--')
-        for iq, freq in zip(iq_todos, freqs):
-            ax2.annotate(f'{freq*100:.1f}%', xy=iq, xytext=(0, 12),
-                         textcoords='offset points', ha='center', fontsize=7.5)
-        ax2.set_xlabel('Componente I', fontsize=11)
-        ax2.set_ylabel('Componente Q', fontsize=11)
-        ax2.set_title('(b) Constelación: frecuencia por símbolo\n'
-                      'Verde=equiprobable  Rojo=desviado', fontsize=10)
-        ax2.axhline(0, color='gray', linewidth=0.5)
-        ax2.axvline(0, color='gray', linewidth=0.5)
-        ax2.grid(True, linestyle='--', alpha=0.3)
-        ax2.set_aspect('equal')
-
-        # (c) P(1) por posición de bit
-        posiciones   = ['b₀ (MSB)', 'b₁', 'b₂', 'b₃ (LSB)']
-        colores_bits = ['#43A047' if abs(p - 0.5) < 0.05 else '#E53935'
-                        for p in p1_bits]
-        ax3.bar(posiciones, p1_bits * 100, color=colores_bits,
-                edgecolor='white', linewidth=0.5)
-        ax3.axhline(50, color='black', linewidth=1.5, linestyle='--',
-                    label='Equiprobable (50%)')
-        ax3.set_ylim(0, 100)
-        ax3.set_xlabel('Posición de bit en símbolo', fontsize=11)
-        ax3.set_ylabel('P(bit=1) (%)', fontsize=11)
-        ax3.set_title('(c) Equiprobabilidad por posición de bit\n'
-                      'Verde: |P(1)−50%| < 5pp   Rojo: desvío > 5pp', fontsize=10)
-        ax3.legend(fontsize=9)
-        ax3.grid(True, axis='y', linestyle='--', alpha=0.5)
-        for i, p in enumerate(p1_bits):
-            ax3.annotate(f'{p*100:.1f}%\n({(p-0.5)*100:+.1f}pp)',
-                         xy=(i, p*100 + 1), ha='center', fontsize=9)
-
-        fig.suptitle(
-            f'{titulo}\n'
-            f'P(1) global = {p1_global*100:.2f}%  |  '
-            f'Desvío = {abs(p1_global-0.5)*100:.2f} pp  |  '
-            f'N = {n_sim:,} símbolos',
-            fontsize=12, fontweight='bold')
-        fig.text(0.5, -0.03,
-                 "El detector Bayesiano (ML) es óptimo bajo el supuesto de símbolos "
-                 "equiprobables. Un desvío significativo implica que el detector MAP "
-                 "con probabilidades a priori reales sería más apropiado.",
-                 ha='center', fontsize=8.5, color='dimgray', style='italic')
-        plt.tight_layout()
-        if guardar:
-            _guardar(fig, nombre_archivo, dir_resultados)
-        plt.show()
-
-    # Figura A: fuente cruda — SIEMPRE se muestra
+    # ── Figura A: fuente cruda (sin scrambling) ──────────────────────────────
     bits_crudo = extraer_segmento(fuente_dict, 0, n_sim, usar_scrambling=False)
-    _graficar(bits_crudo,
-              'Distribución de símbolos — ANTES del scrambling\n'
-              'Fuente: voz + Ley µ (distribución real de la fuente)',
-              'histograma_sin_scrambling.png')
+    _histograma_articulo(
+        bits           = bits_crudo,
+        n_sim          = n_sim,
+        A              = A,
+        titulo         = 'Distribución de símbolos 16-QAM — sin scrambling',
+        nombre_archivo = 'histograma_sin_scrambling.png',
+        guardar        = guardar,
+        dir_resultados = dir_resultados,
+    )
 
-    # Figura B: post-scrambling — solo si está activo
+    # ── Figura B: post-scrambling ─────────────────────────────────────────
     if usar_scrambling:
         bits_scram = extraer_segmento(fuente_dict, 0, n_sim,
                                       usar_scrambling=True,
                                       scrambling_seed=scrambling_seed,
                                       scrambling_poly=scrambling_poly)
-        _graficar(bits_scram,
-                  'Distribución de símbolos — DESPUÉS del scrambling\n'
-                  'Condición usada en el benchmark (equiprobabilidad garantizada)',
-                  'histograma_con_scrambling.png')
+        _histograma_articulo(
+            bits           = bits_scram,
+            n_sim          = n_sim,
+            A              = A,
+            titulo         = 'Distribución de símbolos 16-QAM — con scrambling PRBS-23',
+            nombre_archivo = 'histograma_con_scrambling.png',
+            guardar        = guardar,
+            dir_resultados = dir_resultados,
+        )
     else:
         print("\n  [Histograma] Solo se muestra la distribución de la fuente cruda.")
         print("  [Histograma] Activar USAR_SCRAMBLING=True en config.py para ver "
               "la comparación completa antes/después.")
 
 
+# ---------------------------------------------------------------------------
+# Función interna compartida: histograma minimalista para artículo
+# ---------------------------------------------------------------------------
+def _histograma_articulo(bits, n_sim, A, titulo, nombre_archivo,
+                         guardar, dir_resultados):
+    """
+    Histograma de frecuencia de símbolos 16-QAM para publicación en artículo.
+
+    Diseño minimalista:
+      - Barras de frecuencia relativa por símbolo (0–15)
+      - Línea de referencia equiprobable en gris punteado
+      - Banda de tolerancia ±5% alrededor de la equiprobable
+      - Test chi-cuadrado en esquina (resultado binario, sin fórmula)
+      - Sin porcentaje sobre cada barra (evita sobrecarga visual)
+    """
+    from canal.modulador import modular, simbolos_a_etiquetas
+    from scipy.stats     import chisquare
+
+    etiq     = simbolos_a_etiquetas(modular(bits, A=A), A=A)
+    counts   = np.bincount(etiq, minlength=16)
+    freqs    = counts / counts.sum()
+    freq_uni = 1.0 / 16
+    chi2, pval = chisquare(counts)
+
+    # Colores: azul neutro por defecto; rojo solo si desvío > 10 %
+    desvios = (freqs - freq_uni) / freq_uni * 100
+    COLOR_BASE  = '#4C72B0'
+    COLOR_DESV  = '#C0392B'
+    colores = [COLOR_DESV if abs(d) > 10 else COLOR_BASE for d in desvios]
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    ax.bar(range(16), freqs * 100,
+           color=colores, edgecolor='white', linewidth=0.6,
+           alpha=0.85, zorder=3)
+
+    # Banda de tolerancia ±5 % (zona aceptable alrededor de equiprobable)
+    ax.axhspan(freq_uni * 100 * 0.95, freq_uni * 100 * 1.05,
+               color='#888888', alpha=0.10, zorder=1,
+               label='Tolerancia ±5 %')
+
+    # Línea de referencia equiprobable — gris, discreta
+    ax.axhline(freq_uni * 100, color='#888888', linewidth=1.2,
+               linestyle='--', zorder=4,
+               label=f'Equiprobable = {freq_uni*100:.2f} %')
+
+    # Resultado del test chi-cuadrado — solo conclusión, sin fórmula
+    es_uniforme = pval >= 0.05
+    color_p  = '#27AE60' if es_uniforme else '#C0392B'
+    texto_p  = 'Distribución uniforme' if es_uniforme else 'Distribución no uniforme'
+    ax.text(0.98, 0.97,
+            f'{texto_p}\n$p = {pval:.3f}$ (α = 0.05)',
+            transform=ax.transAxes, fontsize=8.5,
+            va='top', ha='right', color=color_p,
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                      edgecolor=color_p, alpha=0.9))
+
+    # Ejes
+    ax.set_xlabel('Símbolo 16-QAM', fontsize=11)
+    ax.set_ylabel('Frecuencia relativa (%)', fontsize=11)
+    ax.set_xticks(range(16))
+    ax.set_xticklabels([str(i) for i in range(16)], fontsize=9)
+    ax.set_ylim(0, max(freqs * 100) * 1.22)
+    ax.yaxis.set_tick_params(labelsize=9)
+    ax.grid(True, axis='y', linestyle='--', alpha=0.35, zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend(fontsize=9, loc='upper left', framealpha=0.9)
+    ax.set_title(f'{titulo}\n$N = {n_sim:,}$ símbolos',
+                 fontsize=11, pad=10)
+
+    plt.tight_layout()
+    if guardar:
+        _guardar(fig, nombre_archivo, dir_resultados)
+    plt.show()
+
+
+# ---------------------------------------------------------------------------
+# 8. Histograma para artículo — PRE scrambling
+# ---------------------------------------------------------------------------
+def histograma_articulo_pre(fuente_dict, A=1.0, n_simbolos=50_000,
+                            guardar=False, dir_resultados="resultados/"):
+    """
+    Histograma de frecuencia de símbolos 16-QAM ANTES del scrambling.
+    Versión minimalista para publicación en artículo científico.
+
+    Parámetros
+    ----------
+    fuente_dict   : dict devuelto por la función de fuente
+    A             : amplitud de la constelación
+    n_simbolos    : cantidad de símbolos a analizar
+    guardar       : si True, guarda la figura en dir_resultados
+    dir_resultados: carpeta de salida
+    """
+    from fuente.fuente import extraer_segmento
+
+    n_sim = min(n_simbolos, fuente_dict['n_simbolos'])
+    bits  = extraer_segmento(fuente_dict, 0, n_sim, usar_scrambling=False)
+
+    _histograma_articulo(
+        bits       = bits,
+        n_sim      = n_sim,
+        A          = A,
+        titulo     = 'Distribución de símbolos — sin scrambling',
+        nombre_archivo = 'histograma_articulo_pre_scrambling.png',
+        guardar        = guardar,
+        dir_resultados = dir_resultados,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. Histograma para artículo — POST scrambling
+# ---------------------------------------------------------------------------
+def histograma_articulo_post(fuente_dict, A=1.0, n_simbolos=50_000,
+                             scrambling_seed=42, scrambling_poly=0x400007,
+                             guardar=False, dir_resultados="resultados/"):
+    """
+    Histograma de frecuencia de símbolos 16-QAM DESPUÉS del scrambling.
+    Versión minimalista para publicación en artículo científico.
+
+    Parámetros
+    ----------
+    fuente_dict     : dict devuelto por la función de fuente
+    A               : amplitud de la constelación
+    n_simbolos      : cantidad de símbolos a analizar
+    scrambling_seed : semilla del scrambler LFSR
+    scrambling_poly : polinomio generador del scrambler
+    guardar         : si True, guarda la figura en dir_resultados
+    dir_resultados  : carpeta de salida
+    """
+    from fuente.fuente import extraer_segmento
+
+    n_sim = min(n_simbolos, fuente_dict['n_simbolos'])
+    bits  = extraer_segmento(fuente_dict, 0, n_sim,
+                             usar_scrambling=True,
+                             scrambling_seed=scrambling_seed,
+                             scrambling_poly=scrambling_poly)
+
+    _histograma_articulo(
+        bits       = bits,
+        n_sim      = n_sim,
+        A          = A,
+        titulo     = 'Distribución de símbolos — con scrambling',
+        nombre_archivo = 'histograma_articulo_post_scrambling.png',
+        guardar        = guardar,
+        dir_resultados = dir_resultados,
+    )

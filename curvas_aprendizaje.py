@@ -55,12 +55,11 @@ from metricas.metricas     import calcular_ber
 from scrambler             import generar_prbs
 
 from clasificadores.bayes          import ClasificadorBayes
+from clasificadores.logistic_regression import ClasificadorLogisticRegression
 from clasificadores.svm            import ClasificadorSVM_RBF, ClasificadorSVM_Lineal
 from clasificadores.knn            import ClasificadorKNN
 from clasificadores.random_forest  import ClasificadorRandomForest
 from clasificadores.redes_neuronales import ClasificadorMLP, ClasificadorRedProfunda
-from clasificadores.lightgbm_clf     import ClasificadorLightGBM
-from clasificadores.sgd_nystroem     import ClasificadorSGDNystroem
 
 # ── Parámetros del experimento ───────────────────────────────────────────────
 
@@ -88,8 +87,7 @@ COLORES = {
     "Random Forest": "#1E88E5",
     "MLP Simple"   : "#43A047",
     "Red Profunda" : "#00ACC1",
-    "LightGBM"     : "#F9A825",
-    "SGD-Nystroem" : "#6D4C41",
+    "Logistic Reg.": "#F57C00",
 }
 MARKERS = {
     "Bayes (ML)"   : "D",
@@ -99,8 +97,7 @@ MARKERS = {
     "Random Forest": "P",
     "MLP Simple"   : "o",
     "Red Profunda" : "X",
-    "LightGBM"     : "h",
-    "SGD-Nystroem" : "*",
+    "Logistic Reg.": "h",
 }
 
 
@@ -190,32 +187,15 @@ def construir_clasificadores() -> list:
             dir_modelos=config.DIR_MODELOS,
             seed=config.SEED,
         ),
-        ClasificadorLightGBM(
-            n_estimators    = config.LGBM_N_EST_DEFAULT,
-            num_leaves      = config.LGBM_NUM_LEAVES_DEFAULT,
-            n_est_grid      = config.LGBM_N_EST_GRID,
-            num_leaves_grid = config.LGBM_NUM_LEAVES_GRID,
-            optimizar       = True,
-            guardar_modelo  = False,
-            dir_modelos     = config.DIR_MODELOS,
-            seed            = config.SEED,
-            usar_cache      = True,
-            dir_cache       = config.DIR_HIPERPARAMETROS,
-        ),
 
-        ClasificadorSGDNystroem(
-            n_components    = config.SGD_N_COMP_DEFAULT,
-            gamma           = config.SGD_GAMMA_DEFAULT,
-            alpha           = config.SGD_ALPHA_DEFAULT,
-            max_iter        = config.SGD_MAX_ITER,
-            n_comp_grid     = config.SGD_N_COMP_GRID,
-            gamma_grid      = config.SGD_GAMMA_GRID,
-            optimizar       = True,
-            guardar_modelo  = False,
-            dir_modelos     = config.DIR_MODELOS,
-            seed            = config.SEED,
-            usar_cache      = True,
-            dir_cache       = config.DIR_HIPERPARAMETROS,
+        ClasificadorLogisticRegression(
+            C=config.LR_C_DEFAULT,
+            C_grid=config.LR_C_GRID,
+            cv_folds=config.LR_CV_FOLDS,
+            max_iter=config.LR_MAX_ITER,
+            optimizar=True,
+            usar_cache=True,
+            dir_cache=config.DIR_HIPERPARAMETROS,
         ),
     ]
     return clfs
@@ -644,7 +624,7 @@ def main():
     # Estimación de tiempo (muy aproximada)
     n_puntos_totales = (
         len([n for n in N_TRAIN_SWEEP if n <= N_TRAIN_MAX_SVM_RBF]) +  # SVM RBF
-        len(N_TRAIN_SWEEP) * 8  # resto de clasificadores (incluye LightGBM y SGD-Nystroem)
+        len(N_TRAIN_SWEEP) * 6  # resto de clasificadores
     ) * len(EB_N0_PUNTOS) * N_REPETICIONES
     print(f"\n  Puntos totales a evaluar: {n_puntos_totales}")
     print(f"  Nota: SVM RBF a N=20k puede tardar ~15-30 min por punto.")

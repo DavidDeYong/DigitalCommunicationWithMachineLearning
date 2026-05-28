@@ -24,13 +24,13 @@ M_QAM            = 16
 # ---------------------------------------------------------------------------
 # BARRIDO DE Eb/N0
 # ---------------------------------------------------------------------------
-EB_N0_RANGE_DB = [0, 2, 4, 6, 8, 10, 12, 14]   # dB
+EB_N0_RANGE_DB = [0, 2, 4, 6, 8, 10, 12]   # dB
 
 # ---------------------------------------------------------------------------
 # TAMAÑOS DE CONJUNTOS (en símbolos 16-QAM)
 # ---------------------------------------------------------------------------
-N_TRAIN    = 200_000   # Símbolos para la fase de entrenamiento (fijo en todo el barrido)
-N_TEST     = 200_000   # Símbolos de test base — se amplía adaptativamente si es necesario
+N_TRAIN    = 100_000   # Símbolos para la fase de entrenamiento (fijo en todo el barrido)
+N_TEST     = 100_000   # Símbolos de test base — se amplía adaptativamente si es necesario
 N_MAX_TEST = 2_000_000 # Límite práctico para N_TEST adaptativo (tiempo de cómputo)
 # Nota: N_TEST se incrementa automáticamente en puntos de alto Eb/N0 para
 # garantizar al menos 100 errores contados. Si el N necesario supera N_MAX_TEST,
@@ -40,20 +40,20 @@ N_MAX_TEST = 2_000_000 # Límite práctico para N_TEST adaptativo (tiempo de có
 # ---------------------------------------------------------------------------
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------------------------
-SEED = 42
+SEED = 31416
 
 # ---------------------------------------------------------------------------
 # VALIDACIÓN DEL SIMULADOR
 # ---------------------------------------------------------------------------
 # El sistema grafica BER_Bayes_simulada vs BER_teórica y pausa para que
 # el usuario confirme visualmente antes de continuar con ML.
-VALIDAR_SIMULADOR = True    # False para saltar la validación (no recomendado)
+VALIDAR_SIMULADOR = False    # False para saltar la validación (no recomendado)
 
 # ---------------------------------------------------------------------------
 # HIPERPARÁMETROS DE CLASIFICADORES
 # (valores usados si se desactiva la optimización automática)
 # ---------------------------------------------------------------------------
-OPTIMIZAR_HIPERPARAMETROS = True   # True: GridSearch automático | False: usa valores fijos
+OPTIMIZAR_HIPERPARAMETROS = False   # True: GridSearch automático | False: usa valores fijos
 
 # SVM
 SVM_C_DEFAULT     = 10
@@ -65,6 +65,25 @@ SVM_CV_FOLDS      = 5
 # KNN
 KNN_K_DEFAULT = 15
 KNN_K_GRID    = [3, 7, 15, 25, 51]
+
+# SGD-Nystroem
+SGD_N_COMPONENTS_DEFAULT = 500
+SGD_GAMMA_DEFAULT        = 1.0
+SGD_N_COMPONENTS_GRID    = [100, 300, 500, 1000]
+SGD_GAMMA_GRID           = [0.1, 0.5, 1.0, 2.0]
+
+# ELM (Extreme Learning Machine)
+ELM_HIDDEN_DEFAULT     = 1000
+ELM_C_DEFAULT          = 10.0
+ELM_HIDDEN_GRID        = [500, 1000, 2000, 5000, 10000]
+ELM_C_GRID             = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+ELM_ACTIVATION_GRID    = ['relu', 'tanh']   # se evalúan en GridSearch
+
+# Logistic Regression
+LR_C_DEFAULT  = 1.0
+LR_C_GRID     = [0.01, 0.1, 1.0, 10.0, 100.0]
+LR_CV_FOLDS   = 3
+LR_MAX_ITER   = 1000
 
 # Random Forest
 RF_N_TREES_DEFAULT  = 100
@@ -80,21 +99,6 @@ NN_MLP_LR           = 1e-3          # learning rate inicial del optimizador Adam
 NN_MLP_LR_PATIENCE  = 10            # épocas sin mejora antes de reducir LR
 NN_MLP_LR_FACTOR    = 0.5           # factor de reducción del LR (nuevo_LR = LR * factor)
 NN_MLP_LR_MIN       = 1e-5          # LR mínimo — el scheduler no reduce por debajo de esto
-
-
-# LightGBM
-LGBM_N_EST_DEFAULT      = 200
-LGBM_NUM_LEAVES_DEFAULT = 31
-LGBM_N_EST_GRID         = [100, 200, 400]
-LGBM_NUM_LEAVES_GRID    = [15, 31, 63]
-
-# SGD + Nystroem
-SGD_N_COMP_DEFAULT  = 300
-SGD_GAMMA_DEFAULT   = 0.5
-SGD_ALPHA_DEFAULT   = 1e-4
-SGD_MAX_ITER        = 50
-SGD_N_COMP_GRID     = [100, 300, 500]
-SGD_GAMMA_GRID      = [0.1, 0.5, 1.0, 2.0]
 
 # Red Neuronal Profunda
 NN_DEEP_HIDDEN      = (256, 128, 64, 32)
@@ -133,7 +137,7 @@ NN_DEEP_LR_MIN      = 1e-5
 
 MODO_ENTRENAMIENTO = 'piloto'   # 'piloto' | 'fuente'
 MODO_TEST          = 'fuente'   # 'fuente' | 'piloto'
-PILOTO_SEED        = 2025       # Semilla para la secuencia piloto (fija TX y RX)
+PILOTO_SEED        = 3010       # Semilla para la secuencia piloto (fija TX y RX)
 
 # ---------------------------------------------------------------------------
 # SCRAMBLING DE BITS

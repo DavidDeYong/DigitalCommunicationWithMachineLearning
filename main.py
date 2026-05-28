@@ -40,8 +40,9 @@ from clasificadores.svm            import ClasificadorSVM_RBF, ClasificadorSVM_L
 from clasificadores.knn            import ClasificadorKNN
 from clasificadores.random_forest  import ClasificadorRandomForest
 from clasificadores.redes_neuronales import ClasificadorMLP, ClasificadorRedProfunda
-from clasificadores.lightgbm_clf     import ClasificadorLightGBM
-from clasificadores.sgd_nystroem     import ClasificadorSGDNystroem
+from clasificadores.elm_clf             import ClasificadorELM
+from clasificadores.sgd_nystroem        import ClasificadorSGDNystroem
+from clasificadores.logistic_regression import ClasificadorLogisticRegression
 
 from metricas.metricas import (nuevo_registro_clasificador, registrar_punto,
                                 imprimir_resumen, construir_tabla_comparativa,
@@ -219,32 +220,36 @@ def construir_clasificadores() -> list:
             seed=config.SEED,
         ),
 
-        ClasificadorLightGBM(
-            n_estimators    = config.LGBM_N_EST_DEFAULT,
-            num_leaves      = config.LGBM_NUM_LEAVES_DEFAULT,
-            n_est_grid      = config.LGBM_N_EST_GRID,
-            num_leaves_grid = config.LGBM_NUM_LEAVES_GRID,
-            optimizar       = optimizar,
-            guardar_modelo  = config.GUARDAR_MODELOS,
-            dir_modelos     = config.DIR_MODELOS,
-            seed            = config.SEED,
-            usar_cache      = config.USAR_CACHE_HIPERPARAMETROS,
-            dir_cache       = config.DIR_HIPERPARAMETROS,
+        ClasificadorSGDNystroem(
+            n_components=config.SGD_N_COMPONENTS_DEFAULT,
+            gamma=config.SGD_GAMMA_DEFAULT,
+            n_comp_grid=config.SGD_N_COMPONENTS_GRID,
+            gamma_grid=config.SGD_GAMMA_GRID,
+            optimizar=optimizar,
+            usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
+            dir_cache=config.DIR_HIPERPARAMETROS,
         ),
 
-        ClasificadorSGDNystroem(
-            n_components    = config.SGD_N_COMP_DEFAULT,
-            gamma           = config.SGD_GAMMA_DEFAULT,
-            alpha           = config.SGD_ALPHA_DEFAULT,
-            max_iter        = config.SGD_MAX_ITER,
-            n_comp_grid     = config.SGD_N_COMP_GRID,
-            gamma_grid      = config.SGD_GAMMA_GRID,
-            optimizar       = optimizar,
-            guardar_modelo  = config.GUARDAR_MODELOS,
-            dir_modelos     = config.DIR_MODELOS,
-            seed            = config.SEED,
-            usar_cache      = config.USAR_CACHE_HIPERPARAMETROS,
-            dir_cache       = config.DIR_HIPERPARAMETROS,
+        ClasificadorELM(
+            hidden_units=config.ELM_HIDDEN_DEFAULT,
+            C=config.ELM_C_DEFAULT,
+            hidden_units_grid=config.ELM_HIDDEN_GRID,
+            C_grid=config.ELM_C_GRID,
+            activation_grid=config.ELM_ACTIVATION_GRID,
+            optimizar=optimizar,
+            seed=config.SEED,
+            usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
+            dir_cache=config.DIR_HIPERPARAMETROS,
+        ),
+
+        ClasificadorLogisticRegression(
+            C=config.LR_C_DEFAULT,
+            C_grid=config.LR_C_GRID,
+            cv_folds=config.LR_CV_FOLDS,
+            max_iter=config.LR_MAX_ITER,
+            optimizar=optimizar,
+            usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
+            dir_cache=config.DIR_HIPERPARAMETROS,
         ),
     ]
     return clfs
@@ -755,10 +760,12 @@ def main():
     registros      = paso_benchmark(fuente, clasificadores)
 
     # Fusionar con resultados anteriores y guardar
-    registros = rcache.registros_completos(registros, config.DIR_RESULTADOS)
+    registros = rcache.registros_completos(registros, config.DIR_RESULTADOS,
+                                       seed=config.SEED)
     snap = {"Eb_N0_range_dB": config.EB_N0_RANGE_DB,
             "N_train": config.N_TRAIN, "N_test": config.N_TEST}
-    rcache.guardar(registros, config.DIR_RESULTADOS, snap)
+    rcache.guardar(registros, config.DIR_RESULTADOS, snap,
+                   seed=config.SEED)
 
     # PASO 3: Gráficas
     paso_graficas(registros, clasificadores, fuente)
