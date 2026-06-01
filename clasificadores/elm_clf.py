@@ -20,6 +20,12 @@ from datetime import datetime
 from sklearn.model_selection import StratifiedKFold
 from clasificadores.base import ClasificadorBase
 
+try:
+    import torch
+    _TORCH_DISPONIBLE = True
+except ImportError:
+    _TORCH_DISPONIBLE = False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Geometría de la constelación 16-QAM
@@ -145,12 +151,95 @@ class _ELMCore:
         rng            = np.random.default_rng(self.seed)
         self.n_classes = int(y.max()) + 1
         self._init_pesos(X.shape[1], rng)
-        H          = self._H(X)
-        Y          = _one_hot(y, self.n_classes)
-        A          = H.T @ H + np.eye(self.L) / self.C
-        self.beta  = np.linalg.solve(A, H.T @ Y)
+
+        # ── Modo híbrido GPU float32 / CPU float64 ─────────────────────────
+        # PASO 1: H (N×L) en GPU float32  → el paso caro, se beneficia de la GPU
+        # PASO 2: H^T·H (L×L) y H^T·Y (L×16) se pasan a CPU float64 → solo MB
+        # PASO 3: solve lineal en CPU float64 → máxima precisión numérica
+        # Esto evita la paginación VRAM←→RAM que ocurría con float64 en GPU
+        # y garantiza la misma precisión que el modo CPU puro.
+        if _TORCH_DISPONIBLE and torch.cuda.is_available():
+            try:
+                device = torch.device('cuda')
+
+                # — PASO 1: calcular H en GPU (float32, in-place) —
+                X_t = torch.from_numpy(X).to(device).float()
+                W_t = torch.from_numpy(self.W).to(device).float()
+                b_t = torch.from_numpy(self.b).to(device).float()
+
+                H_t = torch.addmm(b_t, X_t, W_t.t())   # N×L float32 en VRAM
+                if self.act == 'relu':
+                    H_t.clamp_(min=0)
+                elif self.act == 'sigmoid':
+                    H_t.clamp_(min=-500, max=500).sigmoid_()
+                elif self.act == 'tanh':
+                    H_t.tanh_()
+                else:
+                    raise ValueError(f"activation desconocida: '{self.act}'")
+
+                # — PASO 2: productos reducidos en GPU → CPU float64 —
+                y_t = torch.from_numpy(y.astype(np.int64)).to(device)
+                Y_t = torch.zeros((len(y), self.n_classes),
+                                  dtype=torch.float32, device=device)
+                Y_t.scatter_(1, y_t.unsqueeze(1), 1.0)
+
+                # H^T·H: (L×N)·(N×L) = L×L  → mueve solo L×L a CPU
+                HtH = (H_t.t() @ H_t).cpu().numpy().astype(np.float64)
+                # H^T·Y: (L×N)·(N×16) = L×16 → mueve solo L×16 a CPU
+                HtY = (H_t.t() @ Y_t).cpu().numpy().astype(np.float64)
+
+                # Liberar H de VRAM inmediatamente (ya no se necesita)
+                del H_t, Y_t, X_t, W_t, b_t, y_t
+                torch.cuda.empty_cache()
+
+                # — PASO 3: solve en CPU con float64 (precisión total) —
+                A = HtH + np.eye(self.L, dtype=np.float64) / self.C
+                self.beta = np.linalg.solve(A, HtY)   # float64
+
+                # Guardar beta también en GPU float32 para predicción rápida
+                self.beta_t = torch.from_numpy(
+                    self.beta.astype(np.float32)).to(device)
+                self._usar_gpu = True
+                return
+
+            except Exception as e:
+                print(f"  [ELM Híbrido GPU] Error durante fit: {e}. "
+                      f"Cayendo en fallback NumPy...")
+
+        # ── Fallback NumPy (CPU, float64) ──────────────────────────────────
+        self._usar_gpu = False
+        H         = self._H(X)
+        Y         = _one_hot(y, self.n_classes)
+        A         = H.T @ H + np.eye(self.L) / self.C
+        self.beta = np.linalg.solve(A, H.T @ Y)
 
     def predict(self, X):
+        if _TORCH_DISPONIBLE and torch.cuda.is_available() and \
+                getattr(self, '_usar_gpu', False):
+            try:
+                device = torch.device('cuda')
+                X_t = torch.from_numpy(X).to(device).float()
+                W_t = torch.from_numpy(self.W).to(device).float()
+                b_t = torch.from_numpy(self.b).to(device).float()
+
+                H_t = torch.addmm(b_t, X_t, W_t.t())
+                if self.act == 'relu':
+                    H_t.clamp_(min=0)
+                elif self.act == 'sigmoid':
+                    H_t.clamp_(min=-500, max=500).sigmoid_()
+                elif self.act == 'tanh':
+                    H_t.tanh_()
+                else:
+                    raise ValueError(f"activation desconocida: '{self.act}'")
+
+                # beta_t en GPU float32 → predicción rápida
+                preds = torch.argmax(H_t @ self.beta_t, dim=1)
+                return preds.cpu().numpy().astype(np.int32)
+
+            except Exception as e:
+                print(f"  [ELM Híbrido GPU] Error durante predict: {e}. "
+                      f"Cayendo en fallback NumPy...")
+
         return np.argmax(self._H(X) @ self.beta, axis=1).astype(np.int32)
 
 

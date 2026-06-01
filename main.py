@@ -12,6 +12,7 @@ Flujo completo:
 Para modificar cualquier parámetro del experimento, editar config.py únicamente.
 """
 
+import argparse
 import numpy as np
 import os
 import sys
@@ -258,9 +259,9 @@ def construir_clasificadores() -> list:
 
 
 # ---------------------------------------------------------------------------
-# Selección interactiva de clasificadores a correr
+# Selección interactiva (o automática) de clasificadores a correr
 # ---------------------------------------------------------------------------
-def paso_seleccion_clasificadores(clasificadores: list) -> list:
+def paso_seleccion_clasificadores(clasificadores: list, auto: bool = False, arg_clf: str = None) -> list:
     """
     Muestra los clasificadores disponibles y los resultados guardados,
     y le pregunta al usuario cuáles quiere correr en esta sesión.
@@ -286,11 +287,20 @@ def paso_seleccion_clasificadores(clasificadores: list) -> list:
     print("  [S] Seleccionar manualmente")
     print()
 
-    while True:
-        opcion = input("  Ingrese opción (A/S): ").strip().upper()
-        if opcion in ("A", "S"):
-            break
-        print("  Ingrese 'A' o 'S'.")
+    if auto:
+        opcion = "A"
+    elif arg_clf:
+        if arg_clf.upper() == "A":
+            opcion = "A"
+        else:
+            opcion = "S"
+            entrada_auto = arg_clf
+    else:
+        while True:
+            opcion = input("  Ingrese opción (A/S): ").strip().upper()
+            if opcion in ("A", "S"):
+                break
+            print("  Ingrese 'A' o 'S'.")
 
     if opcion == "A":
         print(f"\n  Se correrán todos los clasificadores ({len(clasificadores)}).")
@@ -304,14 +314,22 @@ def paso_seleccion_clasificadores(clasificadores: list) -> list:
     print()
 
     while True:
-        entrada = input("  Clasificadores a correr: ").strip()
+        if auto or arg_clf:
+            entrada = entrada_auto
+        else:
+            entrada = input("  Clasificadores a correr: ").strip()
+            
         try:
             indices = [int(x.strip()) - 1 for x in entrada.split(",")]
             if all(0 <= idx < len(clasificadores) for idx in indices) and len(indices) > 0:
                 break
             print(f"  Ingrese números entre 1 y {len(clasificadores)}.")
+            if auto or arg_clf:
+                sys.exit(1) # Cortar si el argumento automático es inválido
         except ValueError:
             print("  Formato inválido. Use números separados por coma.")
+            if auto or arg_clf:
+                sys.exit(1)
 
     seleccionados = [clasificadores[i] for i in indices]
     no_seleccionados = [clasificadores[i] for i in range(len(clasificadores))
@@ -335,9 +353,9 @@ def paso_seleccion_clasificadores(clasificadores: list) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Decisión interactiva sobre hiperparámetros
+# Decisión interactiva (o automática) sobre hiperparámetros
 # ---------------------------------------------------------------------------
-def paso_decision_hiperparametros(clasificadores: list) -> None:
+def paso_decision_hiperparametros(clasificadores: list, auto: bool = False, arg_cache: str = None) -> None:
     """
     Muestra el estado del cache de hiperparámetros y le pregunta al usuario
     qué quiere hacer: usar los valores guardados o ejecutar una nueva búsqueda.
@@ -372,7 +390,8 @@ def paso_decision_hiperparametros(clasificadores: list) -> None:
         print("  ⚠  ADVERTENCIA: La búsqueda de hiperparámetros puede demorar")
         print("     varios minutos dependiendo del hardware.")
         print()
-        input("  Presione ENTER para continuar...")
+        if not auto:
+            input("  Presione ENTER para continuar...")
         _aplicar_decision_cache(clasificadores, usar=False)
         return
 
@@ -387,7 +406,12 @@ def paso_decision_hiperparametros(clasificadores: list) -> None:
         print("  [2] Ejecutar nueva búsqueda GridSearch  (puede demorar varios minutos)")
         print()
 
-        opcion = _pedir_opcion(["1", "2"])
+        if auto:
+            opcion = "1"
+        elif arg_cache in ("1", "2"):
+            opcion = arg_cache
+        else:
+            opcion = _pedir_opcion(["1", "2"])
 
         if opcion == "1":
             print("\n  ✓ Se usarán los hiperparámetros del cache.")
@@ -417,7 +441,12 @@ def paso_decision_hiperparametros(clasificadores: list) -> None:
     print("  [2] Ejecutar nueva búsqueda para TODOS  (puede demorar varios minutos)")
     print()
 
-    opcion = _pedir_opcion(["1", "2"])
+    if auto:
+        opcion = "1"
+    elif arg_cache in ("1", "2"):
+        opcion = arg_cache
+    else:
+        opcion = _pedir_opcion(["1", "2"])
 
     if opcion == "1":
         print("\n  ✓ Se usará el cache donde esté disponible.")
@@ -737,6 +766,12 @@ def paso_graficas(registros: list, clasificadores: list, fuente: dict = None):
 # PUNTO DE ENTRADA
 # ---------------------------------------------------------------------------
 def main():
+    parser = argparse.ArgumentParser(description="Benchmark Unificado - Clasificadores ML para 16-QAM")
+    parser.add_argument("--auto", action="store_true", help="Ejecutar en modo automático (corre todos los clasificadores, usa el caché por defecto).")
+    parser.add_argument("--clasificadores", type=str, help="Clasificadores a correr. 'A' para todos, o lista de índices separados por coma (ej: '1,2').")
+    parser.add_argument("--cache", type=str, choices=["1", "2"], help="Decisión de caché: '1' usar caché, '2' forzar nueva búsqueda GridSearch.")
+    args = parser.parse_args()
+
     t_inicio_total = time.perf_counter()
 
     print("\n" + "█"*60)
@@ -755,8 +790,8 @@ def main():
 
     # PASO 2: Decisión de hiperparámetros + Benchmark ML
     clasificadores = construir_clasificadores()
-    clasificadores = paso_seleccion_clasificadores(clasificadores)
-    paso_decision_hiperparametros(clasificadores)
+    clasificadores = paso_seleccion_clasificadores(clasificadores, auto=args.auto, arg_clf=args.clasificadores)
+    paso_decision_hiperparametros(clasificadores, auto=args.auto, arg_cache=args.cache)
     registros      = paso_benchmark(fuente, clasificadores)
 
     # Fusionar con resultados anteriores y guardar

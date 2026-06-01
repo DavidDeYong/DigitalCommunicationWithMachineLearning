@@ -40,7 +40,7 @@ N_MAX_TEST = 2_000_000 # Límite práctico para N_TEST adaptativo (tiempo de có
 # ---------------------------------------------------------------------------
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------------------------
-SEED = 31416
+SEED = 81015
 
 # ---------------------------------------------------------------------------
 # VALIDACIÓN DEL SIMULADOR
@@ -50,9 +50,13 @@ SEED = 31416
 VALIDAR_SIMULADOR = False    # False para saltar la validación (no recomendado)
 
 # ---------------------------------------------------------------------------
-# HIPERPARÁMETROS DE CLASIFICADORES
-# (valores usados si se desactiva la optimización automática)
+# SELECCIÓN Y CONFIGURACIÓN DE CLASIFICADORES
 # ---------------------------------------------------------------------------
+# Define qué clasificadores se ejecutan en modo automático (como al usar correr_lote.py)
+# "A"       -> Ejecuta TODOS los clasificadores disponibles.
+# "1,2,5"   -> Ejecuta solo los seleccionados por su índice (ej: Bayes, SVM, ELM).
+CLASIFICADORES_A_CORRER = "A"
+
 OPTIMIZAR_HIPERPARAMETROS = False   # True: GridSearch automático | False: usa valores fijos
 
 # SVM
