@@ -159,5 +159,12 @@ class ClasificadorLogisticRegression(ClasificadorBase):
         )
         self._modelo.fit(X_train, y_train)
 
+    def _calcular_flops(self) -> int:
+        # coef_ shape: (16, 2)  →  X @ coef_.T: 16 × 2 × 2 MACs = 64, + 16 bias = 80
+        # softmax: 16 exp + 15 sumas + 16 divisiones = 47
+        # argmax: 15 comparaciones
+        # StandardScaler implicito no se usa aqui (LR opera sobre datos crudos)
+        return 80 + 47 + 15  # = 142
+
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         return self._modelo.predict(X)

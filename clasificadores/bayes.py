@@ -50,6 +50,11 @@ class ClasificadorBayes(ClasificadorBase):
         distancias   = np.sum((X_exp - constelacion) ** 2, axis=2)  # (N, 16)
         return np.argmin(distancias, axis=1).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        # Distancia euclidiana a 16 puntos de constelación: 16 × (2 subs + 2 cuadrados + 1 suma) = 80
+        # argmin sobre 16 valores: 15 comparaciones
+        return 16 * 5 + 15  # = 95
+
     def set_amplitud(self, A: float):
         """Actualiza la amplitud de la constelación (llamar antes de predict en cada Eb/N0)."""
         self.A = A

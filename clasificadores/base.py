@@ -32,6 +32,7 @@ class ClasificadorBase(ABC):
         self._tiempo_entrenamiento: float = 0.0
         self._tiempo_inferencia_1:  float = 0.0
         self._entrenado:            bool  = False
+        self._flops_inferencia:     int   = 0
 
     # ------------------------------------------------------------------
     # Métodos abstractos — deben implementarse en cada subclase
@@ -70,6 +71,14 @@ class ClasificadorBase(ABC):
         """
         ...
 
+    def _calcular_flops(self) -> int:
+        """
+        Calcula los FLOPs para clasificar 1 muestra (d=2 features, 16 clases).
+        Se llama automáticamente al final de fit(). Subclases deben sobreescribir.
+        Convenio: 1 MAC (multiply-accumulate) = 2 FLOPs.
+        """
+        return 0
+
     def optimizar_hiperparametros(
         self,
         X_train: np.ndarray,
@@ -99,6 +108,7 @@ class ClasificadorBase(ABC):
         self._fit_interno(X_train, y_train)
         self._tiempo_entrenamiento = time.perf_counter() - t0
         self._entrenado = True
+        self._flops_inferencia = self._calcular_flops()
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -127,6 +137,11 @@ class ClasificadorBase(ABC):
     # ------------------------------------------------------------------
     # Acceso a métricas de tiempo
     # ------------------------------------------------------------------
+
+    @property
+    def flops_inferencia(self) -> int:
+        """FLOPs para clasificar 1 símbolo (métrica hardware-independiente)."""
+        return self._flops_inferencia
 
     @property
     def tiempo_entrenamiento(self) -> float:

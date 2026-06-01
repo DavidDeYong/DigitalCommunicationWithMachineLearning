@@ -399,6 +399,18 @@ class ClasificadorELM(ClasificadorBase):
         if 'C'            in params: self.C = params['C']
         if 'activation'   in params: self.activation_function = params['activation']
 
+    def _calcular_flops(self) -> int:
+        d = 2
+        H = self._modelo.L
+        # Capa de entrada: x @ W.T + b  →  H × (2d + 1) = H × 5 FLOPs (d=2)
+        flops_H = H * (2 * d + 1)
+        # Funcion de activacion: relu=1, tanh≈5, sigmoid≈10 FLOPs por neurona
+        costo_act = {'relu': 1, 'tanh': 5, 'sigmoid': 10}
+        flops_act = H * costo_act.get(self._modelo.act, 1)
+        # Capa de salida: H @ beta, beta shape (H, 16)  →  16 × (2H) FLOPs
+        flops_out = 2 * H * 16
+        return flops_H + flops_act + flops_out + 15  # +15 argmax
+
     def _guardar(self):
         os.makedirs(self.dir_modelos, exist_ok=True)
         ruta = os.path.join(self.dir_modelos,

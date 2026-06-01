@@ -92,6 +92,7 @@ def nuevo_registro_clasificador(nombre: str) -> dict:
         'accuracy'          : [],
         't_entrenamiento_s' : [],
         't_inferencia_us'   : [],
+        'flops_inferencia'  : [],   # FLOPs por símbolo (hardware-independiente)
         'mejores_hiperparams': [],
         # Información estadística por punto
         'n_errores'         : [],
@@ -111,6 +112,7 @@ def registrar_punto(
     t_inferencia_1:   float,
     mejores_params:   dict,
     n_test_simbolos:  int = None,
+    flops_inferencia: int = 0,
 ) -> None:
     ber, errores = calcular_ber(bits_ref, etiquetas_det)
     accuracy     = calcular_accuracy(etiquetas_ref, etiquetas_det)
@@ -123,6 +125,7 @@ def registrar_punto(
     registro['accuracy'].append(accuracy)
     registro['t_entrenamiento_s'].append(t_entrenamiento)
     registro['t_inferencia_us'].append(t_inferencia_1 * 1e6)
+    registro['flops_inferencia'].append(flops_inferencia)
     registro['mejores_hiperparams'].append(mejores_params)
     registro['n_errores'].append(errores)
     registro['n_test_simbolos'].append(n_simb)
@@ -197,10 +200,12 @@ def imprimir_advertencias_estadisticas(registros: list) -> None:
 def construir_tabla_comparativa(registros: list) -> dict:
     tabla = {}
     for reg in registros:
+        flops = reg.get('flops_inferencia', [])
         tabla[reg['nombre']] = {
             'ber_media'            : np.mean(reg['ber']),
             'accuracy_media'       : np.mean(reg['accuracy']),
             't_train_media_s'      : np.mean(reg['t_entrenamiento_s']),
             't_inferencia_media_us': np.mean(reg['t_inferencia_us']),
+            'flops_inferencia'     : int(flops[0]) if flops else 0,
         }
     return tabla

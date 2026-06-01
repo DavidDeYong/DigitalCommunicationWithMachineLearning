@@ -122,6 +122,16 @@ class ClasificadorKNN(ClasificadorBase):
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         return self.modelo.predict(X).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        # Distancia euclidiana a cada punto de entrenamiento: d=2 → 2 restas + 2 cuadrados + 1 suma = 5
+        n_train = len(self.modelo._fit_X)
+        flops_distancias = n_train * 5
+        # Ordenamiento parcial para los k vecinos: ~n_train comparaciones
+        flops_sort = n_train
+        # Voto mayoritario entre k vecinos
+        flops_voto = self.k - 1
+        return flops_distancias + flops_sort + flops_voto
+
     def _guardar(self):
         os.makedirs(self.dir_modelos, exist_ok=True)
         ruta = os.path.join(self.dir_modelos, f"modelo_KNN_k{self.k}.pkl")

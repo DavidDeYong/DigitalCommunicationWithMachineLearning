@@ -121,6 +121,19 @@ class ClasificadorSGDNystroem(ClasificadorBase):
         X_ny = self._nystroem.transform(X_sc)
         return self._sgd.predict(X_ny).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        d = 2
+        D = self.n_components
+        # StandardScaler: 2 ops por feature
+        flops_scaler = d * 2
+        # Nystroem: kernel RBF a cada landmark (2 restas + 2 cuadrados + 1 suma + 1 mul + exp~20 = 27)
+        flops_kernel = D * 27
+        # Multiplicar por la matriz de normalizacion (D, D): 2D² FLOPs
+        flops_norm = 2 * D * D
+        # SGD clasificador lineal: D × 16 clases × 2 MACs
+        flops_sgd = 2 * D * 16
+        return flops_scaler + flops_kernel + flops_norm + flops_sgd
+
     def reentrenar_incremental(self, X_nuevo, y_nuevo, n_epochs=5):
         """
         Adapta el modelo online a nuevas condiciones del canal via partial_fit.

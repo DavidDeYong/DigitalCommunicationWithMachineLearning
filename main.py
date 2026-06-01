@@ -683,6 +683,7 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
                 t_inferencia_1   = clf.tiempo_inferencia_unitaria,
                 mejores_params   = mejores_params,
                 n_test_simbolos  = n_test,
+                flops_inferencia = clf.flops_inferencia,
             )
 
             ber_actual  = reg['ber'][-1]
@@ -714,15 +715,18 @@ def paso_graficas(registros: list, clasificadores: list, fuente: dict = None):
     tabla = construir_tabla_comparativa(registros)
     print("\n  ── Tabla comparativa (promedios sobre todo el barrido) ──")
     print(f"  {'Clasificador':<20} {'BER media':>12} {'Accuracy':>10} "
-          f"{'T.train(s)':>12} {'T.inf(µs)':>11}")
-    print("  " + "-"*70)
+          f"{'T.train(s)':>12} {'T.inf(µs)':>11} {'FLOPs/símbolo':>15}")
+    print("  " + "-"*86)
     for nombre, metricas in tabla.items():
-        ber_str = f"{metricas['ber_media']:.3e}" if metricas['ber_media'] > 0 else "< 10⁻⁵"
+        ber_str   = f"{metricas['ber_media']:.3e}" if metricas['ber_media'] > 0 else "< 10⁻⁵"
+        flops     = metricas.get('flops_inferencia', 0)
+        flops_str = f"{flops:,}" if flops > 0 else "  N/A"
         print(
             f"  {nombre:<20} {ber_str:>12} "
             f"{metricas['accuracy_media']*100:>9.2f}% "
             f"{metricas['t_train_media_s']:>12.3f} "
-            f"{metricas['t_inferencia_media_us']:>11.4f}"
+            f"{metricas['t_inferencia_media_us']:>11.4f} "
+            f"{flops_str:>15}"
         )
 
     # Gráficas

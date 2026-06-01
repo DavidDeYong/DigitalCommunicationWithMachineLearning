@@ -117,6 +117,15 @@ class ClasificadorRandomForest(ClasificadorBase):
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         return self.modelo.predict(X).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        # Por cada arbol: traversal de raiz a hoja = promedio de profundidad real del arbol
+        # En cada nodo: 1 comparacion de feature + 1 acceso = 2 FLOPs
+        # Mas agregacion de votos: 16 clases por arbol = n_estimators × 16 sumas + 15 argmax
+        profundidad_media = sum(est.tree_.max_depth for est in self.modelo.estimators_) / self.n_estimators
+        flops_traversal = int(self.n_estimators * profundidad_media * 2)
+        flops_voto = self.n_estimators * 16 + 15
+        return flops_traversal + flops_voto
+
     def _guardar(self):
         os.makedirs(self.dir_modelos, exist_ok=True)
         ruta = os.path.join(self.dir_modelos,

@@ -183,6 +183,25 @@ class _RedNeuronalTorch(ClasificadorBase):
         X_sc = self.scaler_.transform(X)
         return self.modelo.predict(X_sc).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        d = 2
+        capas = [d] + list(self.capas_ocultas) + [16]
+        flops = 0
+        for i in range(len(capas) - 1):
+            in_f, out_f = capas[i], capas[i + 1]
+            # Capa lineal: out_f × (2 × in_f) MACs + out_f bias
+            flops += 2 * in_f * out_f + out_f
+            if i < len(capas) - 2:
+                # BatchNorm: 4 ops por unidad (resta media, div std, escala, sesgo)
+                flops += out_f * 4
+                # ReLU: 1 op por unidad
+                flops += out_f
+        # StandardScaler: 2 ops por feature
+        flops += d * 2
+        # argmax sobre 16 clases
+        flops += 15
+        return flops
+
     def _guardar_torch(self):
         import pickle
         os.makedirs(self.dir_modelos, exist_ok=True)

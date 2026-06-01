@@ -125,6 +125,26 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         X_sc = self.scaler.transform(X)
         return self.modelo.predict(X_sc).astype(np.int32)
 
+    def _calcular_flops(self) -> int:
+        # StandardScaler: 2 ops por feature (resta + division), d=2
+        flops_scaler = 2 * 2
+
+        if self.kernel == 'linear':
+            # decision_function: X @ coef_.T  →  coef_ shape (120, 2) para OVO 16 clases
+            n_pares = 16 * 15 // 2  # = 120 pares OVO
+            flops_decision = 2 * 2 * n_pares + n_pares  # MAC + bias
+            flops_voto = n_pares  # votacion entre pares
+            return flops_scaler + flops_decision + flops_voto  # ≈ 600
+
+        else:  # RBF
+            n_sv = len(self.modelo.support_vectors_)
+            # Kernel RBF por cada SV: 2 restas + 2 cuadrados + 1 suma + 1 mul(gamma) + exp(~20) = 27
+            flops_kernel = n_sv * 27
+            # Combinacion lineal con dual_coef_ (C-1, n_sv) = (15, n_sv)
+            flops_decision = n_sv * (16 - 1) * 2 + 16 * 15 // 2  # MAC + bias intercept
+            flops_voto = 16 * 15 // 2  # votacion OVO
+            return flops_scaler + flops_kernel + flops_decision + flops_voto
+
     def _guardar(self):
         os.makedirs(self.dir_modelos, exist_ok=True)
         nombre_archivo = os.path.join(
