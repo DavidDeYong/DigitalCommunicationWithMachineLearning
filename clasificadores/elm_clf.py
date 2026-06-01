@@ -188,6 +188,10 @@ class _ELMCore:
                 # H^T·Y: (L×N)·(N×16) = L×16 → mueve solo L×16 a CPU
                 HtY = (H_t.t() @ Y_t).cpu().numpy().astype(np.float64)
 
+                # Sincronizar antes de mover datos a CPU para que el timer
+                # de fit() capture el tiempo de cómputo GPU real.
+                torch.cuda.synchronize()
+
                 # Liberar H de VRAM inmediatamente (ya no se necesita)
                 del H_t, Y_t, X_t, W_t, b_t, y_t
                 torch.cuda.empty_cache()
@@ -234,6 +238,7 @@ class _ELMCore:
 
                 # beta_t en GPU float32 → predicción rápida
                 preds = torch.argmax(H_t @ self.beta_t, dim=1)
+                torch.cuda.synchronize()
                 return preds.cpu().numpy().astype(np.int32)
 
             except Exception as e:

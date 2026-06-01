@@ -142,6 +142,11 @@ class _RedNeuronalTorch(ClasificadorBase):
             if (epoch + 1) % 10 == 0:
                 print(f"    Epoch {epoch+1}/{self.epochs}  loss={loss_media:.4f}")
 
+        # Esperar a que todos los kernels CUDA terminen antes de retornar,
+        # para que el timer de fit() en base.py capture el tiempo real.
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
+
         if self.guardar_modelo:
             self._guardar_torch()
 
@@ -177,6 +182,10 @@ class _RedNeuronalTorch(ClasificadorBase):
         self.modelo.eval()
         with torch.no_grad():
             logits = self.modelo(X_t)
+            # Sincronizar antes de retornar para que el timer en base.py
+            # capture el tiempo de cómputo real y no solo el lanzamiento del kernel.
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
         return logits.argmax(dim=1).cpu().numpy().astype(np.int32)
 
     def _predict_sklearn(self, X: np.ndarray) -> np.ndarray:
