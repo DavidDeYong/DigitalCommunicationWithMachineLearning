@@ -40,7 +40,7 @@ N_MAX_TEST = 2_000_000 # Límite práctico para N_TEST adaptativo (tiempo de có
 # ---------------------------------------------------------------------------
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------------------------
-SEED = 81015
+SEED = 96598
 
 # ---------------------------------------------------------------------------
 # VALIDACIÓN DEL SIMULADOR
@@ -52,6 +52,18 @@ VALIDAR_SIMULADOR = False    # False para saltar la validación (no recomendado)
 # ---------------------------------------------------------------------------
 # SELECCIÓN Y CONFIGURACIÓN DE CLASIFICADORES
 # ---------------------------------------------------------------------------
+# HARDWARE SELECTION
+# ---------------------------------------------------------------------------
+# FORCE_CPU: if True, all classifiers (including neural nets) run on CPU even if a GPU is available.
+FORCE_CPU = False
+# New flags for GPU SVM and operation count metrics
+USE_GPU_SVM = True  # When True, attempt to run SVM on GPU via ThunderSVM if available
+COMPUTE_OPERATION_COUNTS = True  # Enable FLOP/parameter counting for PyTorch models
+
+
+# DISPLAY SETTINGS
+# SHOW_PLOTS: if True, figures are displayed (blocking). Set to False for batch runs.
+SHOW_PLOTS = False
 # Define qué clasificadores se ejecutan en modo automático (como al usar correr_lote.py)
 # "A"       -> Ejecuta TODOS los clasificadores disponibles.
 # "1,2,5"   -> Ejecuta solo los seleccionados por su índice (ej: Bayes, SVM, ELM).

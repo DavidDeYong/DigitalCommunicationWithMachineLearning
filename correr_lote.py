@@ -19,6 +19,14 @@ import subprocess
 import re
 import time
 
+# Configurar UTF-8 en la salida estándar de Windows para evitar errores de codificación
+if sys.platform.startswith("win"):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+
 # Importamos config para saber qué clasificadores vamos a correr
 import config
 import main as main_script
@@ -140,8 +148,13 @@ def main():
             "--clasificadores", seleccion_str
         ]
         
+        # Inyectar PYTHONUTF8 en las variables de entorno para que el proceso hijo
+        # maneje correctamente los caracteres especiales (como ✓) en Windows.
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, cwd=base_dir, env=env, check=True)
         except subprocess.CalledProcessError:
             print(f"\n⚠ Error durante la ejecución de la corrida con seed {seed}.")
             print("  Se abortará el lote de simulaciones para revisar el error.")

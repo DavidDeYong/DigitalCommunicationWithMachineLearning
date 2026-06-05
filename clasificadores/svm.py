@@ -17,6 +17,22 @@ Con 16 clases genera C(16,2)=120 clasificadores binarios.
 import numpy as np
 import os
 import pickle
+# Conditional import for SVC: prefer ThunderSVM if GPU usage enabled
+try:
+    from thundersvm import SVC as ThunderSVC
+    THUNDERSVM_AVAILABLE = True
+except ImportError:
+    from sklearn.svm import SVC
+    THUNDERSVM_AVAILABLE = False
+from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing  import StandardScaler
+from .base import ClasificadorBase
+import hiperparametros_cache as cache
+# Import configuration flag for GPU SVM usage
+from config import USE_GPU_SVM
+
+import os
+import pickle
 from sklearn.svm            import SVC
 from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing  import StandardScaler
@@ -59,13 +75,25 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         self._mejores_params: dict = {}
 
     def _construir_modelo(self):
-        return SVC(
-            kernel=self.kernel,
-            C=self.C,
-            gamma=self.gamma if self.kernel != 'linear' else 'scale',
-            decision_function_shape='ovo',
-            cache_size=500,
-        )
+        # Choose classifier implementation based on GPU flag and availability
+        if USE_GPU_SVM and THUNDERSVM_AVAILABLE:
+            # ThunderSVM uses similar parameters; specify kernel and gamma
+            return ThunderSVC(
+                kernel=self.kernel,
+                C=self.C,
+                gamma=self.gamma if self.kernel != 'linear' else 'scale',
+                decision_function_shape='ovo',
+                cache_size=500,
+            )
+        else:
+            # Fallback to scikit-learn SVC
+            return SVC(
+                kernel=self.kernel,
+                C=self.C,
+                gamma=self.gamma if self.kernel != 'linear' else 'scale',
+                decision_function_shape='ovo',
+                cache_size=500,
+            )
 
     def optimizar_hiperparametros(
         self,
