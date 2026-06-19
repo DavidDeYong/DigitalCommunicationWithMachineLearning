@@ -40,7 +40,7 @@ N_MAX_TEST = 2_000_000 # Límite práctico para N_TEST adaptativo (tiempo de có
 # ---------------------------------------------------------------------------
 # REPRODUCIBILIDAD
 # ---------------------------------------------------------------------------
-SEED = 96598
+SEED = 68651
 
 # ---------------------------------------------------------------------------
 # VALIDACIÓN DEL SIMULADOR
@@ -55,7 +55,7 @@ VALIDAR_SIMULADOR = False    # False para saltar la validación (no recomendado)
 # HARDWARE SELECTION
 # ---------------------------------------------------------------------------
 # FORCE_CPU: if True, all classifiers (including neural nets) run on CPU even if a GPU is available.
-FORCE_CPU = False
+FORCE_CPU = True
 # New flags for GPU SVM and operation count metrics
 USE_GPU_SVM = True  # When True, attempt to run SVM on GPU via ThunderSVM if available
 COMPUTE_OPERATION_COUNTS = True  # Enable FLOP/parameter counting for PyTorch models
@@ -69,24 +69,36 @@ SHOW_PLOTS = False
 # "1,2,5"   -> Ejecuta solo los seleccionados por su índice (ej: Bayes, SVM, ELM).
 CLASIFICADORES_A_CORRER = "A"
 
-OPTIMIZAR_HIPERPARAMETROS = False   # True: GridSearch automático | False: usa valores fijos
+OPTIMIZAR_HIPERPARAMETROS = True    # True: GridSearch automático | False: usa valores fijos
 
 # SVM
 SVM_C_DEFAULT     = 10
 SVM_GAMMA_DEFAULT = 0.1
-SVM_C_GRID        = [0.1, 1, 10, 100]
-SVM_GAMMA_GRID    = [0.01, 0.1, 1, 'scale']
+SVM_C_GRID        = [10, 100]              # C bajo (0.1, 1) excluido: genera demasiados
+                                           # vectores de soporte -> inferencia impracticable a bajo Eb/N0
+SVM_GAMMA_GRID    = [0.1, 1, 'scale']      # gamma=0.01 (kernel muy ancho) excluido por el mismo motivo
 SVM_CV_FOLDS      = 5
+SVM_MAX_ITER      = 50000   # límite de iteraciones SMO; evita tiempos excesivos a bajo Eb/N0
+SVM_TOL           = 1e-3    # tolerancia de convergencia — más relajada es aceptable donde BER≈0.5
 
 # KNN
 KNN_K_DEFAULT = 15
 KNN_K_GRID    = [3, 7, 15, 25, 51]
+# Submuestreo estratificado del set de entrenamiento (instance selection).
+# KNN es "lazy": fit() solo almacena las muestras, y en este problema (2D,
+# 16 nubes gaussianas) la accuracy satura con ~5-10k muestras. Reducir N
+# baja memoria y operaciones de inferencia sin pérdida de accuracy.
+# None = usar todo N_TRAIN.
+KNN_MAX_TRAIN_SAMPLES = 20_000
 
 # SGD-Nystroem
 SGD_N_COMPONENTS_DEFAULT = 500
 SGD_GAMMA_DEFAULT        = 1.0
 SGD_N_COMPONENTS_GRID    = [100, 300, 500, 1000]
 SGD_GAMMA_GRID           = [0.1, 0.5, 1.0, 2.0]
+SGD_MAX_ITER             = 50      # máximo de épocas del SGD
+SGD_TOL                  = 1e-4    # criterio de parada: detiene si loss > best_loss - tol
+SGD_N_ITER_NO_CHANGE     = 5       # épocas sin mejora antes de detener (early stopping sklearn)
 
 # ELM (Extreme Learning Machine)
 ELM_HIDDEN_DEFAULT     = 1000
@@ -100,6 +112,7 @@ LR_C_DEFAULT  = 1.0
 LR_C_GRID     = [0.01, 0.1, 1.0, 10.0, 100.0]
 LR_CV_FOLDS   = 3
 LR_MAX_ITER   = 1000
+LR_TOL        = 1e-4    # tolerancia de convergencia del solver lbfgs
 
 # Random Forest
 RF_N_TREES_DEFAULT  = 100
@@ -108,22 +121,37 @@ RF_N_TREES_GRID     = [50, 100, 200]
 RF_MAX_DEPTH_GRID   = [6, 8, 12, None]
 
 # Red Neuronal MLP (simple)
-NN_MLP_HIDDEN       = (128, 64)     # capas ocultas
-NN_MLP_EPOCHS       = 100
-NN_MLP_BATCH_SIZE   = 512
-NN_MLP_LR           = 1e-3          # learning rate inicial del optimizador Adam
-NN_MLP_LR_PATIENCE  = 10            # épocas sin mejora antes de reducir LR
-NN_MLP_LR_FACTOR    = 0.5           # factor de reducción del LR (nuevo_LR = LR * factor)
-NN_MLP_LR_MIN       = 1e-5          # LR mínimo — el scheduler no reduce por debajo de esto
+NN_MLP_HIDDEN            = (128, 64)     # capas ocultas
+NN_MLP_EPOCHS            = 60            # límite superior; early stopping actúa antes
+NN_MLP_BATCH_SIZE        = 512
+NN_MLP_LR                = 1e-3          # learning rate inicial del optimizador Adam
+NN_MLP_LR_PATIENCE       = 5             # épocas sin mejora antes de reducir LR
+NN_MLP_LR_FACTOR         = 0.5           # factor de reducción del LR (nuevo_LR = LR * factor)
+NN_MLP_LR_MIN            = 1e-5          # LR mínimo — el scheduler no reduce por debajo de esto
+NN_MLP_EARLY_STOP_PATIENCE = 10          # épocas sin mejora antes de detener entrenamiento
+NN_MLP_EARLY_STOP_MIN_DELTA = 5e-4       # umbral mayor: evita correr épocas de ganancia marginal
 
 # Red Neuronal Profunda
-NN_DEEP_HIDDEN      = (256, 128, 64, 32)
-NN_DEEP_EPOCHS      = 200
-NN_DEEP_BATCH_SIZE  = 512
-NN_DEEP_LR          = 1e-3          # learning rate inicial
-NN_DEEP_LR_PATIENCE = 15            # más paciencia porque tiene más épocas
-NN_DEEP_LR_FACTOR   = 0.5
-NN_DEEP_LR_MIN      = 1e-5
+NN_DEEP_HIDDEN           = (256, 128, 64, 32)
+NN_DEEP_EPOCHS           = 100           # límite superior; early stopping actúa antes
+NN_DEEP_BATCH_SIZE       = 512
+NN_DEEP_LR               = 1e-3          # learning rate inicial
+NN_DEEP_LR_PATIENCE      = 8             # más paciencia porque tiene más capas
+NN_DEEP_LR_FACTOR        = 0.5
+NN_DEEP_LR_MIN           = 1e-5
+NN_DEEP_EARLY_STOP_PATIENCE = 12         # épocas sin mejora antes de detener entrenamiento
+NN_DEEP_EARLY_STOP_MIN_DELTA = 5e-4      # ídem MLP — ganancia marginal no aporta BER
+
+# XGBoost
+XGB_N_ESTIMATORS_DEFAULT   = 200         # número máximo de árboles
+XGB_MAX_DEPTH_DEFAULT      = 6           # profundidad máxima de cada árbol
+XGB_LR_DEFAULT             = 0.1         # learning rate (eta)
+XGB_SUBSAMPLE              = 0.8         # fracción de muestras por árbol
+XGB_COLSAMPLE              = 0.8         # fracción de features por árbol
+XGB_EARLY_STOPPING_ROUNDS  = 20          # rondas sin mejora antes de detener
+XGB_N_ESTIMATORS_GRID      = [100, 200, 500]
+XGB_MAX_DEPTH_GRID         = [4, 6, 8]
+XGB_LR_GRID                = [0.05, 0.1, 0.3]
 
 # ---------------------------------------------------------------------------
 # PROTOCOLO DE ENTRENAMIENTO Y TEST

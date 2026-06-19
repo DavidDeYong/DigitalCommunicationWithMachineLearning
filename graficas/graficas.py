@@ -16,6 +16,10 @@ Figuras generadas:
 """
 
 import numpy as np
+import matplotlib
+import config
+if not getattr(config, 'SHOW_PLOTS', True):
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 from scipy.interpolate import interp1d

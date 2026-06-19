@@ -25,6 +25,10 @@ Criterio estadístico:
 """
 
 import numpy as np
+import matplotlib
+import config
+if not getattr(config, 'SHOW_PLOTS', True):
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from canal.canal_awgn  import ber_teorica_16qam, calcular_sigma, agregar_ruido

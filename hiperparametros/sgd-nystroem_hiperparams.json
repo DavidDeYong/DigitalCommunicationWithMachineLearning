@@ -1,9 +1,9 @@
 {
   "clasificador": "SGD-Nystroem",
-  "fecha": "2026-03-30 18:32:15",
+  "fecha": "2026-06-18 17:07:59",
   "params": {
-    "n_components": 300,
-    "gamma": 2.0
+    "n_components": 100,
+    "gamma": 0.5
   },
-  "cv_accuracy": 0.9625666666666667
+  "cv_accuracy": 0.9585998491870783
 }

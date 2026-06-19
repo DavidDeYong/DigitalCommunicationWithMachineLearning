@@ -26,6 +26,8 @@ class ClasificadorSGDNystroem(ClasificadorBase):
         gamma           = 0.5,
         alpha           = 1e-4,
         max_iter        = 50,
+        tol             = 1e-4,
+        n_iter_no_change= 5,
         n_comp_grid     = None,
         gamma_grid      = None,
         cv_folds        = 3,
@@ -41,6 +43,8 @@ class ClasificadorSGDNystroem(ClasificadorBase):
         self.gamma          = gamma
         self.alpha          = alpha
         self.max_iter       = max_iter
+        self.tol            = tol
+        self.n_iter_no_change = n_iter_no_change
         self.n_comp_grid    = n_comp_grid or [100, 300, 500]
         self.gamma_grid     = gamma_grid  or [0.1, 0.5, 1.0, 2.0]
         self.cv_folds       = cv_folds
@@ -109,10 +113,43 @@ class ClasificadorSGDNystroem(ClasificadorBase):
         X_ny = self._nystroem.fit_transform(X_sc)
         self._sgd = SGDClassifier(
             loss="modified_huber", alpha=self.alpha,
-            max_iter=self.max_iter, tol=1e-4,
+            max_iter=self.max_iter, tol=self.tol,
+            n_iter_no_change=self.n_iter_no_change,
             random_state=self.seed, n_jobs=-1,
         )
         self._sgd.fit(X_ny, y_train)
+
+        n_iter = int(np.max(self._sgd.n_iter_))
+        if n_iter >= self.max_iter:
+            print(f"  [SGD-Nystroem] ⚠ Alcanzó max_iter={self.max_iter} sin converger "
+                  f"(tol={self.tol}).")
+        else:
+            print(f"  [SGD-Nystroem] Convergió/detuvo en época {n_iter} "
+                  f"(tol={self.tol}, n_iter_no_change={self.n_iter_no_change}).")
+
+        # ── FLOPs analíticos (estimado) ──────────────────────────────────
+        # Inferencia por muestra:
+        #   1) Mapeo Nystroem: kernel RBF contra L landmarks → L×(3d + ~10) ops
+        #      (resta, cuadrado, suma por dimensión + exponencial)
+        #   2) Proyección al subespacio: L×L MACs (multiplicación por normalization_)
+        #   3) Capa lineal SGD: L×C MACs
+        L = self.n_components
+        d = X_train.shape[1]
+        C_cls = len(self._sgd.classes_)
+        flops_kernel = L * (3 * d + 10)
+        flops_proy   = 2 * L * L
+        flops_lineal = 2 * L * C_cls
+        self.flops_inferencia = float(flops_kernel + flops_proy + flops_lineal)
+        self.n_parametros     = int(L * d + L * L + (L + 1) * C_cls)
+        self.flops_tipo       = "estimado"
+        # Entrenamiento: mapeado Nystroem (N muestras) + SGD pase por los datos
+        N = X_train.shape[0]
+        # Nystroem sobre N muestras: N * (kernel_per_landmark + proyeccion) ≈ N * L * 3d
+        flops_ny_train = N * L * 3 * d
+        # SGD: n_iter pases completos con actualización lineal (L → C)
+        flops_sgd_train = 2 * N * L * C_cls * n_iter
+        self.flops_entrenamiento = float(flops_ny_train + flops_sgd_train)
+
         if self.guardar_modelo:
             self._guardar()
 

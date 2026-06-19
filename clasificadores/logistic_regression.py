@@ -51,6 +51,7 @@ class ClasificadorLogisticRegression(ClasificadorBase):
         C_grid: list         = None,
         cv_folds: int        = 3,
         max_iter: int        = 1000,
+        tol: float           = 1e-4,
         optimizar: bool      = True,
         usar_cache: bool     = True,
         dir_cache: str       = "hiperparametros/",
@@ -62,6 +63,7 @@ class ClasificadorLogisticRegression(ClasificadorBase):
         self._C_grid   = C_grid or [0.01, 0.1, 1.0, 10.0, 100.0]
         self._cv_folds = cv_folds
         self._max_iter = max_iter
+        self._tol      = tol
         self._optimizar  = optimizar
         self._usar_cache = usar_cache
         self._dir_cache  = dir_cache
@@ -155,9 +157,29 @@ class ClasificadorLogisticRegression(ClasificadorBase):
             C=self._C,
             solver="lbfgs",
             max_iter=self._max_iter,
+            tol=self._tol,
             random_state=42,
         )
         self._modelo.fit(X_train, y_train)
+
+        n_iter = int(np.max(self._modelo.n_iter_))
+        if n_iter >= self._max_iter:
+            print(f"  [LR] ⚠ El solver alcanzó max_iter={self._max_iter} sin converger "
+                  f"(tol={self._tol}). Considerar aumentar LR_MAX_ITER.")
+        else:
+            print(f"  [LR] Convergió en {n_iter} iteraciones (tol={self._tol}).")
+
+        # ── FLOPs analíticos (estimado) ──────────────────────────────────
+        # Inferencia softmax multinomial: z = W·x + b  →  d×C MACs (+ C sesgos)
+        # Factor 2: multiplicación + suma por cada MAC. El argmax es despreciable.
+        d, C_cls = self._modelo.coef_.shape[1], self._modelo.coef_.shape[0]
+        self.flops_inferencia = float(2 * d * C_cls + C_cls)
+        self.n_parametros     = int((d + 1) * C_cls)
+        self.flops_tipo       = "estimado"
+        # Entrenamiento L-BFGS multinomial: por iteración N × (forward + grad)
+        # Forward = 2*d*C MACs; grad ≈ mismo costo; × 3 cubre curvatura L-BFGS
+        N = X_train.shape[0]
+        self.flops_entrenamiento = float(3 * N * 2 * d * C_cls * n_iter)
 
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         return self._modelo.predict(X)

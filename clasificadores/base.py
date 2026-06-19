@@ -32,6 +32,13 @@ class ClasificadorBase(ABC):
         self._tiempo_entrenamiento: float = 0.0
         self._tiempo_inferencia_1:  float = 0.0
         self._entrenado:            bool  = False
+        # FLOPs / operaciones de inferencia por muestra (None = no calculado)
+        self.flops_inferencia:   float | None = None
+        self.flops_entrenamiento: float | None = None   # FLOPs totales del último fit()
+        self.n_parametros:       int   | None = None
+        # 'medido' (thop sobre el modelo real) o 'estimado' (fórmula analítica)
+        self.flops_tipo:         str   | None = None
+
 
     # ------------------------------------------------------------------
     # Métodos abstractos — deben implementarse en cada subclase
@@ -103,7 +110,13 @@ class ClasificadorBase(ABC):
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
-        Predice etiquetas para X. Mide el tiempo de inferencia para 1 símbolo.
+        Predice etiquetas para X y mide el tiempo de inferencia amortizado
+        por símbolo (tiempo total del lote / N).
+
+        Se mide sobre todo el lote en lugar de una sola muestra: con batch=1
+        el costo está dominado por el overhead de dispatch del framework
+        (~ms en PyTorch CPU), que no refleja el costo computacional real.
+        Amortizar por símbolo da una métrica comparable entre modelos.
 
         Returns
         -------
@@ -115,14 +128,20 @@ class ClasificadorBase(ABC):
                 "Llamar a fit() antes de predict()."
             )
 
-        # Medir tiempo de inferencia unitaria (un solo símbolo)
-        muestra_unica = X[0:1]
-        t0 = time.perf_counter()
-        _ = self._predict_interno(muestra_unica)
-        self._tiempo_inferencia_1 = time.perf_counter() - t0
+        # Warmup: una llamada previa sobre una muestra dispara las
+        # inicializaciones perezosas (cálculo de FLOPs en la 1ª inferencia,
+        # asignación de buffers de PyTorch, JIT) para que no contaminen la
+        # medición de tiempo del lote completo.
+        _ = self._predict_interno(X[0:1])
 
-        # Predicción completa
-        return self._predict_interno(X)
+        # Medir inferencia sobre TODO el lote y amortizar por símbolo.
+        n = len(X)
+        t0 = time.perf_counter()
+        etiquetas = self._predict_interno(X)
+        t_total = time.perf_counter() - t0
+        self._tiempo_inferencia_1 = t_total / max(n, 1)
+
+        return etiquetas
 
     # ------------------------------------------------------------------
     # Acceso a métricas de tiempo
@@ -135,7 +154,8 @@ class ClasificadorBase(ABC):
 
     @property
     def tiempo_inferencia_unitaria(self) -> float:
-        """Tiempo de inferencia para 1 símbolo en segundos."""
+        """Tiempo de inferencia amortizado por símbolo en segundos
+        (tiempo total del lote de test / N)."""
         return self._tiempo_inferencia_1
 
     def __repr__(self) -> str:

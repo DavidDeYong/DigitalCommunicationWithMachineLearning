@@ -31,7 +31,16 @@ class ClasificadorBayes(ClasificadorBase):
 
     def _fit_interno(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
         """No requiere entrenamiento. Marca como entrenado para mantener interfaz."""
-        pass   # No-op
+        # ── FLOPs analíticos (estimado) ──────────────────────────────────
+        # Distancia euclidiana a los 16 símbolos: por símbolo y dimensión
+        # → resta + cuadrado + suma = 3 ops. Luego argmin (despreciable).
+        d = X_train.shape[1]
+        M = 16
+        self.flops_inferencia    = float(M * 3 * d)
+        self.n_parametros        = int(M * d)   # coordenadas de la constelación
+        self.flops_tipo          = "estimado"
+        # Bayes: solo almacena centroides de constelación, sin optimización iterativa
+        self.flops_entrenamiento = 0.0
 
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         """

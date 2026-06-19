@@ -98,19 +98,28 @@ def nuevo_registro_clasificador(nombre: str) -> dict:
         'n_test_simbolos'   : [],
         'confiable'         : [],
         'n_necesario'       : [],
+        # Costo computacional de inferencia (por muestra)
+        'flops_inferencia'    : [],   # FLOPs/operaciones por inferencia (None = no calculado)
+        'flops_entrenamiento' : [],   # FLOPs totales del último fit() (None = no calculado)
+        'n_parametros'        : [],   # parámetros del modelo (None = no calculado)
+        'flops_tipo'          : [],   # 'medido' (thop) | 'estimado' (analítico) | None
     }
 
 
 def registrar_punto(
-    registro:         dict,
-    Eb_N0_dB:         float,
-    bits_ref:         np.ndarray,
-    etiquetas_ref:    np.ndarray,
-    etiquetas_det:    np.ndarray,
-    t_entrenamiento:  float,
-    t_inferencia_1:   float,
-    mejores_params:   dict,
-    n_test_simbolos:  int = None,
+    registro:           dict,
+    Eb_N0_dB:           float,
+    bits_ref:           np.ndarray,
+    etiquetas_ref:      np.ndarray,
+    etiquetas_det:      np.ndarray,
+    t_entrenamiento:    float,
+    t_inferencia_1:     float,
+    mejores_params:     dict,
+    n_test_simbolos:    int = None,
+    flops_inferencia:   float = None,
+    flops_entrenamiento: float = None,
+    n_parametros:       int = None,
+    flops_tipo:         str = None,
 ) -> None:
     ber, errores = calcular_ber(bits_ref, etiquetas_det)
     accuracy     = calcular_accuracy(etiquetas_ref, etiquetas_det)
@@ -128,6 +137,18 @@ def registrar_punto(
     registro['n_test_simbolos'].append(n_simb)
     registro['confiable'].append(info_conf['confiable'])
     registro['n_necesario'].append(info_conf['n_necesario'])
+    # Compatibilidad con registros cargados de JSON antiguos (sin estos campos)
+    registro.setdefault('flops_inferencia', [])
+    registro.setdefault('flops_entrenamiento', [])
+    registro.setdefault('n_parametros', [])
+    registro.setdefault('flops_tipo', [])
+    registro['flops_inferencia'].append(
+        float(flops_inferencia) if flops_inferencia is not None else None)
+    registro['flops_entrenamiento'].append(
+        float(flops_entrenamiento) if flops_entrenamiento is not None else None)
+    registro['n_parametros'].append(
+        int(n_parametros) if n_parametros is not None else None)
+    registro['flops_tipo'].append(flops_tipo)
 
 
 # ---------------------------------------------------------------------------

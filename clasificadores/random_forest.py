@@ -111,6 +111,16 @@ class ClasificadorRandomForest(ClasificadorBase):
         )
         self.modelo.fit(X_train, y_train)
 
+        # ── FLOPs analíticos (estimado) ──────────────────────────────────
+        # Inferencia: recorrer cada árbol desde la raíz hasta una hoja
+        # → profundidad real media × 1 comparación por nodo, por árbol.
+        # Se usan las profundidades reales de los árboles entrenados.
+        profundidades = [est.tree_.max_depth for est in self.modelo.estimators_]
+        nodos_totales = sum(est.tree_.node_count for est in self.modelo.estimators_)
+        self.flops_inferencia = float(sum(profundidades))   # 1 comparación por nivel
+        self.n_parametros     = int(nodos_totales)
+        self.flops_tipo       = "estimado"
+
         if self.guardar_modelo:
             self._guardar()
 

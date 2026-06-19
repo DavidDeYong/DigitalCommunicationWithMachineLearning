@@ -27,7 +27,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
 from scipy import stats
-from scipy.stats import wilcoxon
 
 try:
     from adjustText import adjust_text as _adjust_text
@@ -140,40 +139,46 @@ def _subplots_2col(rows, cols, h=_H1, **kw):
 # Se priorizan tonos distinguibles tanto en color como en luminancia.
 COLORES = {
     "Bayes (ML)":    "#000000",   # negro
-    "SVM RBF":       "#C0392B",   # rojo oscuro
+    "Logistic Reg.": "#B7950B",   # dorado oscuro  — grupo 1: equiv. estadístico
+    "SVM RBF":       "#C0392B",   # rojo oscuro     — grupo 2: degradación moderada
     "SVM Lineal":    "#E67E22",   # naranja
-    "MLP Simple":    "#7D3C98",   # púrpura
-    "Red Profunda":  "#1A8599",   # cian oscuro
     "SGD-Nystroem":  "#5D4037",   # marrón
+    "XGBoost":       "#117A65",   # verde azulado
+    "KNN":           "#2980B9",   # azul
+    "MLP Simple":    "#7D3C98",   # púrpura          — grupo 3: degradación sistemática
+    "Red Profunda":  "#1A8599",   # cian oscuro
     "ELM":           "#1E8449",   # verde oscuro
-    "Logistic Reg.": "#B7950B",   # dorado oscuro
 }
 
 # Marcadores variados para distinguir curvas sin depender solo del color
 MARKERS = {
     "Bayes (ML)":    "D",    # diamante
+    "Logistic Reg.": "h",    # hexágono
     "SVM RBF":       "s",    # cuadrado
     "SVM Lineal":    "^",    # triángulo arriba
+    "SGD-Nystroem":  "P",    # plus grueso
+    "XGBoost":       "d",    # diamante delgado
+    "KNN":           "*",    # estrella
     "MLP Simple":    "v",    # triángulo abajo
     "Red Profunda":  "o",    # círculo
-    "SGD-Nystroem":  "P",    # plus grueso
     "ELM":           "X",    # X gruesa
-    "Logistic Reg.": "h",    # hexágono
 }
 
+# Orden lógico: Bayes primero, luego por grupo de desempeño esperado
 ORDEN_CLF = list(COLORES.keys())
 
 NOMBRES_CORTOS = {
     "Bayes (ML)":    "Bayes",
+    "Logistic Reg.": "Log.\nReg.",
     "SVM RBF":       "SVM\nRBF",
     "SVM Lineal":    "SVM\nLineal",
+    "SGD-Nystroem":  "SGD-\nNystr.",
+    "XGBoost":       "XGB",
     "KNN":           "KNN",
-    "Random Forest": "Rand.\nForest",
     "MLP Simple":    "MLP\nSimple",
     "Red Profunda":  "Red\nProf.",
-    "SGD-Nystroem":  "SGD-\nNystr.",
     "ELM":           "ELM",
-    "Logistic Reg.": "Log.\nReg.",
+    "Random Forest": "Rand.\nForest",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,7 +213,9 @@ RUTA_JSON  = _encontrar_json()
 DIR_SALIDA = os.path.join(CARPETA, "figuras_ieee")
 PATRON_TXT = "ResultadoCompleto*seed*.txt"
 SEEDS_EXCLUIR  = {0}
-CLFS_EXCLUIR   = {"KNN", "KNN (k=15)", "Random Forest"}
+CLFS_EXCLUIR   = {"Random Forest", "XGBoost"}   # KNN incluido; XGBoost excluido (degradación severa a 12 dB)
+# Cuántos archivos seed_*.json más recientes usar (None = todos)
+N_ULTIMOS_JSON = 11
 EB_N0_FORZADOS = None
 EB_N0_ESTABLES = [6, 8, 10, 12]
 EB_N0_ESPERADOS = [0, 2, 4, 6, 8, 10, 12, 14]
@@ -272,20 +279,38 @@ def cargar_desde_json(ruta_json: str, seeds_excluir: set = None) -> pd.DataFrame
             t_inf_list    = reg.get("t_inferencia_us",    [])
             confiable_list= reg.get("confiable",          [])
             errores_list  = reg.get("n_errores",          [])
+            # FLOPs: escalares por clf (independientes de Eb/N0)
+            _ft_raw = reg.get("flops_train", None)
+            _fi_raw = reg.get("flops_inf",   None)
+            # Fallback: leer listas por Eb/N0 y tomar mediana de valores no nulos
+            if _fi_raw is None:
+                _fi_list = reg.get("flops_inferencia", None)
+                if _fi_list:
+                    _vals = [v for v in _fi_list if v is not None]
+                    _fi_raw = float(np.nanmedian(_vals)) if _vals else None
+            if _ft_raw is None:
+                _ft_list = reg.get("flops_entrenamiento", None)
+                if _ft_list:
+                    _vals = [v for v in _ft_list if v is not None]
+                    _ft_raw = float(np.nanmedian(_vals)) if _vals else None
+            flops_train_val = float(_ft_raw) if _ft_raw is not None else np.nan
+            flops_inf_val   = float(_fi_raw) if _fi_raw is not None else np.nan
             n = len(eb_n0_list)
             for i in range(n):
                 registros.append({
-                    "seed":       seed,
-                    "corrida_id": corrida_id,
-                    "fecha":      fecha,
-                    "clf":        clf,
-                    "eb_n0":      int(eb_n0_list[i]),
-                    "ber":        float(ber_list[i])       if i < len(ber_list)       else np.nan,
-                    "accuracy":   float(acc_list[i])       if i < len(acc_list)       else np.nan,
-                    "t_train":    float(t_train_list[i])   if i < len(t_train_list)   else np.nan,
-                    "t_inf":      float(t_inf_list[i])     if i < len(t_inf_list)     else np.nan,
-                    "confiable":  bool(confiable_list[i])  if i < len(confiable_list) else False,
-                    "n_errores":  int(errores_list[i])     if i < len(errores_list)   else 0,
+                    "seed":        seed,
+                    "corrida_id":  corrida_id,
+                    "fecha":       fecha,
+                    "clf":         clf,
+                    "eb_n0":       int(eb_n0_list[i]),
+                    "ber":         float(ber_list[i])       if i < len(ber_list)       else np.nan,
+                    "accuracy":    float(acc_list[i])       if i < len(acc_list)       else np.nan,
+                    "t_train":     float(t_train_list[i])   if i < len(t_train_list)   else np.nan,
+                    "t_inf":       float(t_inf_list[i])     if i < len(t_inf_list)     else np.nan,
+                    "confiable":   bool(confiable_list[i])  if i < len(confiable_list) else False,
+                    "n_errores":   int(errores_list[i])     if i < len(errores_list)   else 0,
+                    "flops_train": flops_train_val,
+                    "flops_inf":   flops_inf_val,
                 })
             n_clfs += 1
         print(f"  seed={seed:>6}  corrida_id={corrida_id}  "
@@ -353,12 +378,39 @@ def cargar_desde_txt(carpeta: str, patron: str) -> pd.DataFrame:
     return pd.DataFrame(todos)
 
 
+def _cargar_desde_multiples_json(carpeta_resultados: str,
+                                  n_ultimos: int | None = None,
+                                  seeds_excluir: set | None = None) -> pd.DataFrame:
+    """Carga los N archivos resultados_seed_*.json más recientes de carpeta_resultados."""
+    patron = os.path.join(carpeta_resultados, "resultados_seed_*.json")
+    archivos = sorted(glob.glob(patron), key=os.path.getmtime)
+    if not archivos:
+        raise FileNotFoundError(f"No se encontraron archivos resultados_seed_*.json en {carpeta_resultados}")
+    if n_ultimos is not None:
+        archivos = archivos[-n_ultimos:]
+    print(f"  Cargando {len(archivos)} archivo(s) seed:")
+    todos = []
+    for ruta in archivos:
+        print(f"    {os.path.basename(ruta)}")
+        df_seed = cargar_desde_json(ruta, seeds_excluir=seeds_excluir)
+        todos.append(df_seed)
+    return pd.concat(todos, ignore_index=True)
+
+
 def cargar_datos() -> tuple[pd.DataFrame, list]:
     print("\n[Carga] Buscando fuente de datos...")
+    carpeta_resultados = os.path.join(CARPETA_PROYECTO, "resultados")
+    archivos_seed = glob.glob(os.path.join(carpeta_resultados, "resultados_seed_*.json"))
     if os.path.exists(RUTA_JSON):
-        print(f"  Fuente: JSON → {RUTA_JSON}")
+        print(f"  Fuente: JSON unico -> {RUTA_JSON}")
         df = cargar_desde_json(RUTA_JSON, seeds_excluir=SEEDS_EXCLUIR)
         fuente = "JSON"
+    elif archivos_seed:
+        print(f"  Fuente: archivos seed (N_ULTIMOS_JSON={N_ULTIMOS_JSON})")
+        df = _cargar_desde_multiples_json(carpeta_resultados,
+                                          n_ultimos=N_ULTIMOS_JSON,
+                                          seeds_excluir=SEEDS_EXCLUIR)
+        fuente = "JSON-seeds"
     else:
         print(f"  JSON no encontrado. Usando TXT.")
         df = cargar_desde_txt(CARPETA, PATRON_TXT)
@@ -410,6 +462,25 @@ def estadisticas_grupo(df_grupo: pd.DataFrame, col: str) -> dict:
     }
 
 
+def _mediana_robusta(valores, k=1.5):
+    """
+    Mediana tras eliminar outliers superiores por cerca IQR.
+    Solo elimina outliers por arriba (hibernación/suspensión infla t, no reduce).
+    Retorna (mediana_filtrada, n_original, n_filtrado).
+    """
+    v = np.asarray(valores, dtype=float)
+    v = v[~np.isnan(v)]
+    if len(v) == 0:
+        return np.nan, 0, 0
+    q1, q3 = np.percentile(v, 25), np.percentile(v, 75)
+    iqr = q3 - q1
+    limite = q3 + k * iqr if iqr > 0 else np.inf
+    v_filt = v[v <= limite]
+    if len(v_filt) == 0:
+        v_filt = v   # si todos son outliers, devolver sin filtrar
+    return float(np.median(v_filt)), len(v), len(v_filt)
+
+
 def ordenar_clasificadores_por_performance(df, eb_ref=10):
     sub = df[(df["eb_n0"] == eb_ref) & df["confiable"]]
     ranking = (
@@ -423,6 +494,9 @@ def ordenar_clasificadores_por_performance(df, eb_ref=10):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ber_teorica_16qam(eb_n0_db: np.ndarray) -> np.ndarray:
+    # Ec. (2) del artículo: Pb = (3/8) erfc(sqrt(2*Eb/(5*N0)))
+    # Equivalencia: (3/4)*(1/2)*erfc(sqrt((4/5)*x)/sqrt(2))
+    #             = (3/8)*erfc(sqrt(4x/10)) = (3/8)*erfc(sqrt(2x/5))  ✓
     from scipy.special import erfc
     eb_n0_lin = 10 ** (eb_n0_db / 10)
     return 0.75 * 0.5 * erfc(np.sqrt(0.8 * eb_n0_lin) / np.sqrt(2))
@@ -602,10 +676,67 @@ def fig_degradacion_db(df: pd.DataFrame, dir_out: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FIGURA 4 — Heatmap p-values Wilcoxon
+# FIGURA 4 — Heatmap p-values t de Student pareado (diferencias en dB)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_pareado(df: pd.DataFrame, clf_a: str, clf_b: str, eb: int = 10) -> dict:
+    """
+    Compara clf_a vs clf_b en eb dB mediante dos tests sobre Delta_dB pareado.
+
+    Delta_dB_i = 10*log10(BER_a[seed_i] / BER_b[seed_i])
+
+    Returns dict con:
+      p_ttest   : p-value t de Student (H0: media(Delta_dB) = 0)
+      p_wilcoxon: p-value Wilcoxon signed-rank (no paramétrico, mismo H0)
+      n_pares   : número de seeds comunes
+      delta_media : media de Delta_dB (dB)
+      delta_ic95  : semiancho IC95% de Delta_dB
+    """
+    from scipy.stats import wilcoxon as _wilcoxon
+    sub   = df[(df["eb_n0"] == eb) & df["confiable"]]
+    diffs = _diferencias_db_pareadas(sub, clf_a, clf_b)
+    result = {"n_pares": len(diffs), "delta_media": np.nan,
+              "delta_ic95": np.nan, "p_ttest": np.nan, "p_wilcoxon": np.nan}
+    if len(diffs) < 2:
+        return result
+    result["delta_media"] = float(np.mean(diffs))
+    lo, hi = ic95(diffs)
+    result["delta_ic95"] = float((hi - lo) / 2)
+    try:
+        _, result["p_ttest"] = stats.ttest_1samp(diffs, popmean=0.0)
+    except Exception:
+        pass
+    try:
+        _, result["p_wilcoxon"] = _wilcoxon(diffs)
+    except Exception:
+        pass
+    return result
+
+
+def _diferencias_db_pareadas(sub: pd.DataFrame, clf_a: str, clf_b: str) -> np.ndarray:
+    """
+    Diferencias pareadas por seed: Δ_dB = 10·log10(BER_a / BER_b).
+    Opera en escala logarítmica para mejorar la simetría de la distribución.
+    Solo incluye seeds presentes en ambos clasificadores.
+    """
+    seeds_a = set(sub[sub["clf"] == clf_a]["seed"].values)
+    seeds_b = set(sub[sub["clf"] == clf_b]["seed"].values)
+    seeds   = sorted(seeds_a & seeds_b)
+    diffs = []
+    for s in seeds:
+        ba = sub[(sub["clf"] == clf_a) & (sub["seed"] == s)]["ber"].values
+        bb = sub[(sub["clf"] == clf_b) & (sub["seed"] == s)]["ber"].values
+        if len(ba) > 0 and len(bb) > 0 and bb[0] > 0 and ba[0] > 0:
+            diffs.append(10 * np.log10(ba[0] / bb[0]))
+    return np.array(diffs)
+
+
 def fig_heatmap_pvalues(df: pd.DataFrame, dir_out: str):
+    """
+    Heatmap de p-values del t de Student pareado sobre diferencias en dB.
+    Coherente con el IC 95% basado en t de Student declarado en el artículo.
+    Las diferencias log(BER_a/BER_b) son más simétricas que las BER crudas.
+    """
     eb_ref         = 10
     clfs_presentes = [c for c in ORDEN_CLF if c in df["clf"].unique()]
     n              = len(clfs_presentes)
@@ -616,14 +747,12 @@ def fig_heatmap_pvalues(df: pd.DataFrame, dir_out: str):
         for j, clf_b in enumerate(clfs_presentes):
             if i == j:
                 continue
-            vals_a  = sub[sub["clf"] == clf_a]["ber"].values
-            vals_b  = sub[sub["clf"] == clf_b]["ber"].values
-            min_n   = min(len(vals_a), len(vals_b))
-            if min_n < 2:
+            diffs = _diferencias_db_pareadas(sub, clf_a, clf_b)
+            if len(diffs) < 2:
                 p_matrix[i, j] = np.nan
                 continue
             try:
-                _, p = wilcoxon(vals_a[:min_n], vals_b[:min_n])
+                _, p = stats.ttest_1samp(diffs, popmean=0.0)
             except Exception:
                 p = 1.0
             p_matrix[i, j] = p
@@ -631,16 +760,15 @@ def fig_heatmap_pvalues(df: pd.DataFrame, dir_out: str):
     mask = np.eye(n, dtype=bool)
     p_df = pd.DataFrame(p_matrix, index=clfs_presentes, columns=clfs_presentes)
 
-    # Tamaño: cuadrado compacto para publicación
     fig, ax = plt.subplots(figsize=(_W1 + 0.5, _W1 + 0.5))
     cmap    = sns.diverging_palette(10, 145, s=80, l=55, as_cmap=True)
     sns.heatmap(p_df, annot=True, fmt=".3f", cmap=cmap,
                 vmin=0, vmax=0.1, mask=mask,
                 linewidths=0.4, ax=ax,
                 annot_kws={"size": _FS_ANNOT - 1},
-                cbar_kws={"label": "$p$-value (Wilcoxon)", "shrink": 0.8})
+                cbar_kws={"label": "$p$-value ($t$ pareado, $\\Delta$dB)", "shrink": 0.8})
 
-    ax.set_title(f"$p$-values Wilcoxon — BER @ {eb_ref} dB",
+    ax.set_title(f"$p$-values $t$ de Student pareado — $\\Delta$dB @ {eb_ref} dB",
                  fontsize=_FS_TITLE)
     ax.tick_params(axis="x", rotation=35, labelsize=_FS_BASE - 1)
     ax.tick_params(axis="y", rotation=0,  labelsize=_FS_BASE - 1)
@@ -788,10 +916,11 @@ def fig_scatter_ber_ttrain(df: pd.DataFrame, dir_out: str):
         d = sub[sub["clf"] == clf]
         if len(d) == 0:
             continue
-        ber_media   = d["ber"].mean()
-        train_media = d["t_train"].median()
-        ber_std     = d["ber"].std()
-        train_iqr   = d["t_train"].quantile(0.75) - d["t_train"].quantile(0.25)
+        ber_media, _, _   = _mediana_robusta(d["ber"].values)
+        train_media, _, _ = _mediana_robusta(d["t_train"].values)
+        ber_media         = d["ber"].mean()
+        ber_std           = d["ber"].std()
+        train_iqr         = d["t_train"].quantile(0.75) - d["t_train"].quantile(0.25)
 
         ax.errorbar(train_media, ber_media,
                     xerr=train_iqr / 2, yerr=ber_std,
@@ -828,17 +957,18 @@ def fig_scatter_ber_tinf(df: pd.DataFrame, dir_out: str):
         d = sub[sub["clf"] == clf]
         if len(d) == 0:
             continue
-        ber_media = d["ber"].mean()
-        inf_media = d["t_inf"].median()
-        ber_std   = d["ber"].std()
-        inf_iqr   = d["t_inf"].quantile(0.75) - d["t_inf"].quantile(0.25)
+        ber_media         = d["ber"].mean()
+        inf_media, _, _   = _mediana_robusta(d["t_inf"].values)
+        ber_std           = d["ber"].std()
+        inf_iqr           = d["t_inf"].quantile(0.75) - d["t_inf"].quantile(0.25)
 
         ax.errorbar(inf_media, ber_media,
                     xerr=inf_iqr / 2, yerr=ber_std,
                     fmt=MARKERS.get(clf, "o"),
                     color=COLORES.get(clf, "gray"),
                     ms=5, capsize=2.5, lw=1.0,
-                    label=clf, zorder=3)
+                    label=("MLP Profundo" if clf == "Red Profunda" else clf),
+                    zorder=3)
 
     ax.set_xscale("log")
     ax.set_xlabel("$t_{inf}$ (µs/symbol)")
@@ -906,26 +1036,413 @@ def fig_cv(df: pd.DataFrame, dir_out: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def imprimir_tabla_resumen(df: pd.DataFrame):
+    n_corridas     = df["seed"].nunique()
     clfs_presentes = [c for c in ORDEN_CLF if c in df["clf"].unique()]
-    sub = df[df["eb_n0"].isin(EB_N0_ESTABLES) & df["confiable"]]
-    print("\n" + "=" * 90)
-    print("  TABLA RESUMEN — Media ± IC95% — Eb/N0 estables")
-    print("=" * 90)
-    print(f"  {'Clasificador':<20}  {'BER media':>12}  {'±IC95%':>10}  "
-          f"{'CV_BER%':>8}  {'t_train(s)':>11}  {'t_inf(µs)':>11}  {'n':>4}")
-    print("  " + "-" * 86)
+    sub            = df[df["eb_n0"].isin(EB_N0_ESTABLES) & df["confiable"]]
+    con_flops      = _tiene_flops(df)
+
+    ancho = 116 if con_flops else 90
+    print("\n" + "=" * ancho)
+    print(f"  TABLA RESUMEN — Media +- IC95% — Eb/N0 estables — {n_corridas} corridas")
+    print("=" * ancho)
+    header = (f"  {'Clasificador':<20}  {'BER media':>12}  {'+-IC95%':>10}  "
+              f"{'CV_BER%':>8}  {'t_train(s)':>12}  {'t_inf(us)':>12}  {'n':>4}")
+    if con_flops:
+        header += f"  {'f_train(med)':>13}  {'f_inf(med)':>12}"
+    print(header)
+    print("  " + "-" * (ancho - 2))
+
     for clf in clfs_presentes:
         d  = sub[sub["clf"] == clf]
         eb = estadisticas_grupo(d, "ber")
-        et = estadisticas_grupo(d, "t_train")
-        ei = estadisticas_grupo(d, "t_inf")
         if not eb:
             continue
+        tt_med, tt_n, tt_nf = _mediana_robusta(d["t_train"].values)
+        ti_med, ti_n, ti_nf = _mediana_robusta(d["t_inf"].values)
+        tt_flag = f"*{tt_n-tt_nf}" if tt_n > tt_nf else ""
+        ti_flag = f"*{ti_n-ti_nf}" if ti_n > ti_nf else ""
         ic_ancho = (eb["ic_hi"] - eb["ic_lo"]) / 2
-        print(f"  {clf:<20}  {eb['media']:>12.4e}  {ic_ancho:>10.2e}  "
-              f"{eb['cv']:>8.1f}  {et.get('mediana', 0):>11.2f}  "
-              f"{ei.get('mediana', 0):>11.1f}  {eb['n']:>4}")
-    print("=" * 90)
+        row = (f"  {clf:<20}  {eb['media']:>12.4e}  {ic_ancho:>10.2e}  "
+               f"{eb['cv']:>8.1f}  {tt_med:>9.2f}{tt_flag:<3}  "
+               f"{ti_med:>9.1f}{ti_flag:<3}  {eb['n']:>4}")
+        if con_flops:
+            ft = d["flops_train"].dropna()
+            fi = d["flops_inf"].dropna()
+            sft = f"{ft.median():.3e}" if len(ft) > 0 else "N/A"
+            sfi = f"{fi.median():.3e}" if len(fi) > 0 else "N/A"
+            row += f"  {sft:>13}  {sfi:>12}"
+        print(row)
+    print("=" * ancho)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA B — Tabla FLOPs mediana ± IQR por clasificador
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tiene_flops(df: pd.DataFrame) -> bool:
+    """True si al menos una fila tiene flops_train o flops_inf no NaN."""
+    if "flops_train" not in df.columns and "flops_inf" not in df.columns:
+        return False
+    return (df["flops_train"].notna().any() or df["flops_inf"].notna().any())
+
+
+def imprimir_tabla_flops(df: pd.DataFrame):
+    if not _tiene_flops(df):
+        print("\n[FLOPs] Campo flops_train/flops_inf ausente en los JSON — tabla omitida.")
+        print("        TODO: agregar medición de FLOPs al pipeline principal (main.py).")
+        return
+
+    clfs_presentes = [c for c in ORDEN_CLF if c in df["clf"].unique()]
+    # Usar un Eb/N0 estable como referencia; los FLOPs son iguales para todos los Eb/N0
+    sub = df[df["eb_n0"].isin(EB_N0_ESTABLES)].drop_duplicates(subset=["seed", "clf"])
+
+    print("\n" + "=" * 80)
+    print("  TABLA FLOPs — Mediana ± IQR por clasificador (Tabla V artículo)")
+    print("=" * 80)
+    print(f"  {'Clasificador':<20}  {'flops_train (med)':>18}  {'IQR_train':>12}"
+          f"  {'flops_inf (med)':>16}  {'IQR_inf':>10}")
+    print("  " + "-" * 76)
+
+    for clf in clfs_presentes:
+        d = sub[sub["clf"] == clf]
+        ft = d["flops_train"].dropna().values
+        fi = d["flops_inf"].dropna().values
+
+        def _med_iqr(v):
+            if len(v) == 0:
+                return "N/A", "N/A"
+            med = np.median(v)
+            iqr = np.percentile(v, 75) - np.percentile(v, 25)
+            return f"{med:.3e}", f"{iqr:.2e}"
+
+        med_t, iqr_t = _med_iqr(ft)
+        med_i, iqr_i = _med_iqr(fi)
+        print(f"  {clf:<20}  {med_t:>18}  {iqr_t:>12}  {med_i:>16}  {iqr_i:>10}")
+
+    print("=" * 80)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA C — Bubble chart BER vs flops_inf (tamaño = flops_train)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_bubble_flops(df: pd.DataFrame, dir_out: str):
+    """
+    Eje X : flops_inf mediana (escala log) — independiente del hardware
+    Eje Y : BER media @ 10 dB
+    Burbuja: área ∝ flops_train mediana
+
+    Complementa/reemplaza fig9 (BER vs t_inf) para benchmarks reproducibles
+    entre plataformas.
+    """
+    if not _tiene_flops(df):
+        print("  [fig_bubble_flops] FLOPs no disponibles — figura omitida.")
+        return
+
+    eb_ref         = 10
+    clfs_ordenados = ordenar_clasificadores_por_performance(df, eb_ref)
+    sub            = df[(df["eb_n0"] == eb_ref) & df["confiable"]]
+    ref_seed       = df[df["clf"] == "Bayes (ML)"].drop_duplicates(subset=["seed", "clf"])
+
+    fig, ax = plt.subplots(figsize=(_W1 + 0.4, _H1 + 0.4))
+
+    # Escala de burbujas: normalizar al máximo de flops_train presente
+    ft_vals = [sub[sub["clf"] == c]["flops_train"].median()
+               for c in clfs_ordenados if not sub[sub["clf"] == c].empty]
+    ft_max = max((v for v in ft_vals if not np.isnan(v)), default=np.nan)
+    _tiene_ft = not np.isnan(ft_max)
+
+    texts = []
+    for clf in clfs_ordenados:
+        d = sub[sub["clf"] == clf]
+        if d.empty:
+            continue
+        ber_med   = d["ber"].mean()
+        fi_med    = d["flops_inf"].median()
+        ft_med    = d["flops_train"].median()
+        if np.isnan(fi_med):
+            continue
+        if _tiene_ft and not np.isnan(ft_med):
+            bubble_sz = 30 + 500 * (ft_med / ft_max)
+        else:
+            bubble_sz = 180   # tamaño uniforme cuando flops_train no disponible
+        sc = ax.scatter(fi_med, ber_med,
+                        s=bubble_sz,
+                        color=COLORES.get(clf, "gray"),
+                        marker="o", alpha=0.75, zorder=3,
+                        edgecolors="white", linewidths=0.5)
+        txt = ax.text(fi_med, ber_med,
+                      NOMBRES_CORTOS.get(clf, clf).replace("\n", " "),
+                      fontsize=_FS_ANNOT, ha="left", va="bottom",
+                      color=COLORES.get(clf, "gray"))
+        texts.append(txt)
+
+    if _HAS_ADJUSTTEXT:
+        _adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle="-", lw=0.5))
+
+    ax.set_xscale("log")
+    ax.set_xlabel("FLOPs de inferencia por símbolo (mediana)")
+    ax.set_ylabel("BER media @ 10 dB")
+    if _tiene_ft:
+        titulo_extra = "(área burbuja $\\propto$ FLOPs entrenamiento)"
+    else:
+        titulo_extra = "(tamaño uniforme — FLOPs entrenamiento no disponibles)"
+    ax.set_title(f"Compromiso BER vs FLOPs\n{titulo_extra}")
+    ax.yaxis.grid(True, which="both")
+    ax.xaxis.grid(True, which="both")
+
+    # Leyenda de escala de burbuja (solo cuando hay flops_train)
+    if _tiene_ft:
+        for frac, lbl in [(0.1, "10%"), (0.5, "50%"), (1.0, "100%")]:
+            sz = 30 + 500 * frac
+            ax.scatter([], [], s=sz, color="gray", alpha=0.5,
+                       label=f"$f_{{train}}$: {lbl} del máx.")
+        ax.legend(loc="upper right", fontsize=_FS_LEGEND - 1, framealpha=0.85)
+
+    fig.tight_layout(pad=0.4)
+    _guardar(fig, "fig11_bubble_ber_vs_flops", dir_out)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA D — Eficiencia computacional η normalizada
+# ─────────────────────────────────────────────────────────────────────────────
+
+def imprimir_ranking_eficiencia(df: pd.DataFrame):
+    """
+    η = (1 - BER_clf/BER_Bayes) / log10(flops_inf)
+
+    Cuanto mayor η, mejor BER por FLOP de inferencia.
+    Métrica hardware-agnóstica para comparación entre plataformas.
+    """
+    if not _tiene_flops(df):
+        print("\n[Eficiencia η] FLOPs no disponibles — ranking omitido.")
+        print("               Disponible cuando flops_inf esté en los JSON.")
+        return
+
+    eb_ref = 10
+    sub    = df[(df["eb_n0"] == eb_ref) & df["confiable"]]
+    bayes  = sub[sub["clf"] == "Bayes (ML)"]["ber"].mean()
+    if bayes <= 0 or np.isnan(bayes):
+        print("\n[Eficiencia η] BER Bayes no disponible — ranking omitido.")
+        return
+
+    clfs_sin_bayes = [c for c in ORDEN_CLF
+                      if c in df["clf"].unique() and c != "Bayes (ML)"]
+    resultados = []
+    for clf in clfs_sin_bayes:
+        d       = sub[sub["clf"] == clf]
+        fi_med  = d["flops_inf"].median()
+        ber_med = d["ber"].mean()
+        if np.isnan(fi_med) or fi_med <= 0 or np.isnan(ber_med):
+            continue
+        ber_norm = ber_med / bayes
+        log_fi   = np.log10(fi_med)
+        if log_fi <= 0:
+            continue
+        eta = (1.0 - ber_norm) / log_fi
+        resultados.append((clf, ber_norm, fi_med, eta))
+
+    if not resultados:
+        print("\n[Eficiencia η] Sin datos suficientes para calcular η.")
+        return
+
+    resultados.sort(key=lambda x: -x[3])   # mayor η primero
+
+    print("\n" + "=" * 75)
+    print("  RANKING EFICIENCIA COMPUTACIONAL — η = (1 − BER_norm) / log₁₀(flops_inf)")
+    print(f"  Referencia Bayes: BER = {bayes:.4e} @ {eb_ref} dB")
+    print("=" * 75)
+    print(f"  {'#':<3}  {'Clasificador':<20}  {'BER_norm':>10}  "
+          f"{'flops_inf':>12}  {'η':>10}")
+    print("  " + "-" * 71)
+    for rank, (clf, ber_norm, fi, eta) in enumerate(resultados, 1):
+        print(f"  {rank:<3}  {clf:<20}  {ber_norm:>10.4f}  {fi:>12.3e}  {eta:>10.4f}")
+    print("=" * 75)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA D (figura) — Eficiencia η: bar chart hardware-agnóstico
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_eficiencia_flops(df: pd.DataFrame, dir_out: str):
+    """
+    Bar chart de η = (1 − BER_norm) / log10(flops_inf) por clasificador.
+    Omitido si flops_inf no está disponible en los JSON.
+    """
+    if not _tiene_flops(df):
+        print("  [fig_eficiencia_flops] FLOPs no disponibles — figura omitida.")
+        return
+
+    eb_ref         = 10
+    clfs_sin_bayes = [c for c in ORDEN_CLF
+                      if c in df["clf"].unique() and c != "Bayes (ML)"]
+    sub    = df[(df["eb_n0"] == eb_ref) & df["confiable"]]
+    bayes  = sub[sub["clf"] == "Bayes (ML)"]["ber"].mean()
+    if np.isnan(bayes) or bayes <= 0:
+        print("  [fig_eficiencia_flops] BER Bayes no disponible — figura omitida.")
+        return
+
+    etas, colores, nombres = [], [], []
+    for clf in clfs_sin_bayes:
+        d      = sub[sub["clf"] == clf]
+        fi_med = d["flops_inf"].median()
+        ber    = d["ber"].mean()
+        if np.isnan(fi_med) or fi_med <= 0 or np.isnan(ber):
+            continue
+        log_fi = np.log10(fi_med)
+        if log_fi <= 0:
+            continue
+        etas.append((1.0 - ber / bayes) / log_fi)
+        colores.append(COLORES.get(clf, "gray"))
+        nombres.append(NOMBRES_CORTOS.get(clf, clf).replace("\n", " "))
+
+    if not etas:
+        return
+
+    fig, ax = plt.subplots(figsize=(_W1 + 0.4, _H1))
+    x = np.arange(len(etas))
+    ax.bar(x, etas, color=colores, alpha=0.8, edgecolor="white", linewidth=0.4)
+    ax.axhline(0, color="black", lw=0.6, ls="--", alpha=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(nombres, fontsize=_FS_BASE - 1)
+    ax.set_ylabel(r"$\eta = (1 - \mathrm{BER}_\mathrm{norm}) / \log_{10}(f_\mathrm{inf})$")
+    ax.set_title(f"Eficiencia computacional $\\eta$ @ {eb_ref} dB\n"
+                 "(mayor = mejor BER por FLOP, hardware-agnostico)")
+    ax.yaxis.grid(True)
+    fig.tight_layout(pad=0.4)
+    _guardar(fig, "fig_eficiencia_flops", dir_out)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA E — Curvas de aprendizaje BER vs N_train
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_curvas_aprendizaje(df: pd.DataFrame, dir_out: str):
+    """
+    BER vs N_train por clasificador — requiere que el JSON incluya resultados
+    con N_train variable (campo 'n_train' por corrida o por registro).
+
+    TODO: implementar cuando el pipeline principal (curvas_aprendizaje.py)
+          agregue los resultados al JSON de benchmark. Por ahora:
+          - Si existe columna 'n_train' con > 1 valor distinto → graficar.
+          - Si no → omitir con aviso.
+
+    Uso previsto (Trabajo Futuro): determinar tamaño mínimo de secuencia piloto.
+    """
+    if "n_train" not in df.columns or df["n_train"].nunique() <= 1:
+        print("  [fig_curvas_aprendizaje] Campo 'n_train' variable no disponible"
+              " en los JSON — figura omitida.")
+        print("  TODO: integrar curvas_aprendizaje.py al JSON de benchmark"
+              " para habilitar esta figura.")
+        return
+
+    eb_ref         = 10
+    clfs_presentes = [c for c in ORDEN_CLF if c in df["clf"].unique()
+                      and c != "Bayes (ML)"]
+    ber_teo        = _ber_teorica_16qam(np.array([float(eb_ref)]))[0]
+    ns_disponibles = sorted(df["n_train"].dropna().unique())
+
+    fig, ax = plt.subplots(figsize=(_W1 + 0.4, _H1 + 0.2))
+
+    for clf in clfs_presentes:
+        medianas = []
+        for n in ns_disponibles:
+            sub = df[(df["clf"] == clf) & (df["eb_n0"] == eb_ref)
+                     & (df["n_train"] == n) & df["confiable"]]
+            if sub.empty:
+                medianas.append(np.nan)
+            else:
+                medianas.append(np.median(sub["ber"].values))
+        ax.plot(ns_disponibles, medianas,
+                color=COLORES.get(clf, "gray"),
+                marker=MARKERS.get(clf, "o"),
+                ms=4, lw=1.3, label=clf)
+
+    ax.axhline(ber_teo, color="black", ls="--", lw=1.0,
+               label=f"Bayes teórico ({ber_teo:.2e})")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("$N_{train}$ (símbolos)")
+    ax.set_ylabel(f"BER mediana @ {eb_ref} dB")
+    ax.set_title("Curvas de aprendizaje — BER vs. $N_{{train}}$\n"
+                 "(tamaño mínimo de secuencia piloto)")
+    ax.legend(loc="upper right", ncol=2, fontsize=_FS_LEGEND)
+    ax.yaxis.grid(True, which="both")
+    ax.xaxis.grid(True, which="both")
+
+    fig.tight_layout(pad=0.4)
+    _guardar(fig, "fig12_curvas_aprendizaje", dir_out)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAREA F — Corrección por comparaciones múltiples (Benjamini-Hochberg)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _bh_correction(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
+    """
+    Corrección Benjamini-Hochberg (FDR) sobre un array 1-D de p-values.
+    Devuelve array de p_adj del mismo tamaño, con NaN donde p_values era NaN.
+    """
+    mask_valid = ~np.isnan(p_values)
+    p_adj = np.full_like(p_values, np.nan)
+    if mask_valid.sum() == 0:
+        return p_adj
+    m       = mask_valid.sum()
+    idx_ord = np.argsort(p_values[mask_valid])
+    p_sorted = p_values[mask_valid][idx_ord]
+    ranks   = np.arange(1, m + 1)
+    # p_adj[i] = min over j>=i of (m/rank[j]) * p[j], clipped to [0,1]
+    adj = np.minimum(1.0, np.minimum.accumulate((m / ranks * p_sorted)[::-1])[::-1])
+    p_adj_valid              = np.empty(m)
+    p_adj_valid[idx_ord]     = adj
+    p_adj[mask_valid]        = p_adj_valid
+    return p_adj
+
+
+def imprimir_tabla_pvalues_adj(df: pd.DataFrame, eb_ref: int = 10):
+    """
+    Imprime tabla de p-values (t de Student pareado sobre Delta_dB) y p_adj
+    (Benjamini-Hochberg) de cada clasificador vs Bayes.
+
+    Se usa ttest_1samp sobre diferencias por seed:
+        Delta_dB = 10*log10(BER_clf / BER_Bayes)
+    Coherente con el IC 95% declarado en el articulo. Las diferencias en
+    escala logaritmica son mas simetricas que las BER crudas, mejorando
+    la validez del supuesto de normalidad del t-test.
+    Con >=9 comparaciones multiples, BH controla el FDR al 5%.
+    """
+    n_corridas     = df["seed"].nunique()
+    clfs_sin_bayes = [c for c in ORDEN_CLF
+                      if c in df["clf"].unique() and c != "Bayes (ML)"]
+
+    tests   = [test_pareado(df, clf, "Bayes (ML)", eb=eb_ref) for clf in clfs_sin_bayes]
+    p_t_arr = np.array([t["p_ttest"]    for t in tests])
+    p_w_arr = np.array([t["p_wilcoxon"] for t in tests])
+    p_adj_t = _bh_correction(p_t_arr)
+    p_adj_w = _bh_correction(p_w_arr)
+
+    print(f"\n{'='*90}")
+    print(f"  P-VALUES vs Bayes — t Student pareado & Wilcoxon (Delta_dB) + Benjamini-Hochberg")
+    print(f"  Eb/N0 = {eb_ref} dB  |  n corridas = {n_corridas}  |  "
+          f"alpha = 0.05  |  m = {len(clfs_sin_bayes)} comparaciones")
+    print(f"{'='*90}")
+    print(f"  {'Clasificador':<20}  {'Delta_dB':>9}  {'+-IC95%':>7}  "
+          f"{'p_t':>8}  {'p_t_BH':>8}  {'p_W':>8}  {'p_W_BH':>8}  {'Sig.':>6}")
+    print("  " + "-" * 86)
+    for clf, t, pt, ptadj, pw, pwadj in zip(
+            clfs_sin_bayes, tests, p_t_arr, p_adj_t, p_w_arr, p_adj_w):
+        dm   = f"{t['delta_media']:+.3f}" if not np.isnan(t['delta_media'])  else "N/A"
+        dic  = f"{t['delta_ic95']:.3f}"  if not np.isnan(t['delta_ic95'])   else "N/A"
+        spt  = f"{pt:.4f}"   if not np.isnan(pt)    else "N/A"
+        spta = f"{ptadj:.4f}" if not np.isnan(ptadj) else "N/A"
+        spw  = f"{pw:.4f}"   if not np.isnan(pw)    else "N/A"
+        spwa = f"{pwadj:.4f}" if not np.isnan(pwadj) else "N/A"
+        sig  = "(*)" if (not np.isnan(ptadj) and ptadj < 0.05) else ""
+        print(f"  {clf:<20}  {dm:>9}  {dic:>7}  "
+              f"{spt:>8}  {spta:>8}  {spw:>8}  {spwa:>8}  {sig:>6}")
+    print(f"{'='*90}")
+    print("  Sig. (*): p_t_BH < 0.05 — diferencia significativa vs Bayes (FDR 5%).")
+    print("  Delta_dB = 10*log10(BER_clf/BER_Bayes), positivo = peor que Bayes.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -945,6 +1462,15 @@ def main():
 
     imprimir_tabla_resumen(df)
 
+    # Tarea B — Tabla FLOPs
+    imprimir_tabla_flops(df)
+
+    # Tarea D — Ranking eficiencia η
+    imprimir_ranking_eficiencia(df)
+
+    # Tarea F — P-values corregidos Benjamini-Hochberg
+    imprimir_tabla_pvalues_adj(df, eb_ref=10)
+
     print(f"\n[Figuras] Generando en: {DIR_SALIDA}\n")
     fig_ber_vs_ebn0(df, DIR_SALIDA)
     fig_boxplot_ber(df, DIR_SALIDA)
@@ -957,10 +1483,25 @@ def main():
     fig_scatter_ber_tinf(df, DIR_SALIDA)
     fig_cv(df, DIR_SALIDA)
 
+    # Tarea C — Bubble chart FLOPs (omitido si flops no disponibles)
+    fig_bubble_flops(df, DIR_SALIDA)
+
+    # Tarea D (figura) — Eficiencia η (omitido si flops no disponibles)
+    fig_eficiencia_flops(df, DIR_SALIDA)
+
+    # Tarea E — Curvas de aprendizaje (omitido si n_train variable no disponible)
+    fig_curvas_aprendizaje(df, DIR_SALIDA)
+
+    n_figs = 10
+    if _tiene_flops(df):
+        n_figs += 2   # bubble + eficiencia
+    if "n_train" in df.columns and df["n_train"].nunique() > 1:
+        n_figs += 1
+
     formatos = []
     if GUARDAR_PNG: formatos.append("PNG 600 dpi")
     if GUARDAR_PDF: formatos.append("PDF vectorial")
-    print(f"\n[Listo] 10 figuras guardadas en '{DIR_SALIDA}'")
+    print(f"\n[Listo] {n_figs} figuras — {df['seed'].nunique()} corridas — '{DIR_SALIDA}'")
     print(f"        Formatos: {', '.join(formatos)}")
     print("=" * 60)
 

@@ -1,9 +1,8 @@
 {
   "clasificador": "logistic_regression",
-  "fecha": "2026-03-30 16:09:12",
+  "fecha": "2026-06-18 17:27:33",
   "params": {
-    "C": 0.01,
-    "cv_accuracy": 0.9626600111703514
+    "C": 1.0
   },
-  "cv_accuracy": null
+  "cv_accuracy": 0.9621997592680683
 }

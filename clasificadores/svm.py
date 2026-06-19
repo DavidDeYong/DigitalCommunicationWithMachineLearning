@@ -17,27 +17,28 @@ Con 16 clases genera C(16,2)=120 clasificadores binarios.
 import numpy as np
 import os
 import pickle
-# Conditional import for SVC: prefer ThunderSVM if GPU usage enabled
+
+# --- ThunderSVM (GPU-accelerated SVM) ---
+# Requires the native library to be compiled. If unavailable or not built,
+# fall back silently to scikit-learn SVC (CPU).
+_THUNDERSVM_AVAILABLE = False
+ThunderSVC = None
 try:
     from thundersvm import SVC as ThunderSVC
-    THUNDERSVM_AVAILABLE = True
-except ImportError:
-    from sklearn.svm import SVC
-    THUNDERSVM_AVAILABLE = False
+    _THUNDERSVM_AVAILABLE = True
+except Exception:
+    pass  # ThunderSVM not available; will use sklearn SVC
+
+# scikit-learn is always available as the CPU baseline
+from sklearn.svm             import SVC
 from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing  import StandardScaler
+from sklearn.preprocessing   import StandardScaler
 from .base import ClasificadorBase
 import hiperparametros_cache as cache
-# Import configuration flag for GPU SVM usage
 from config import USE_GPU_SVM
 
-import os
-import pickle
-from sklearn.svm            import SVC
-from sklearn.model_selection import GridSearchCV
-from sklearn.preprocessing  import StandardScaler
-from .base import ClasificadorBase
-import hiperparametros_cache as cache
+# Module-level flag for easy introspection from correr_lote.py
+THUNDERSVM_AVAILABLE = _THUNDERSVM_AVAILABLE
 
 
 class _ClasificadorSVM_Base(ClasificadorBase):
@@ -56,6 +57,8 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         dir_modelos:        str,
         usar_cache:         bool = True,
         dir_cache:          str  = "hiperparametros/",
+        max_iter:           int  = -1,      # -1 = sin límite (comportamiento sklearn por defecto)
+        tol:                float = 1e-4,   # tolerancia de convergencia
     ):
         super().__init__()
         self.kernel         = kernel
@@ -69,31 +72,29 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         self.dir_modelos    = dir_modelos
         self.usar_cache     = usar_cache
         self.dir_cache      = dir_cache
+        self.max_iter       = max_iter
+        self.tol            = tol
 
         self.scaler = StandardScaler()
         self.modelo = None
         self._mejores_params: dict = {}
 
+
     def _construir_modelo(self):
-        # Choose classifier implementation based on GPU flag and availability
-        if USE_GPU_SVM and THUNDERSVM_AVAILABLE:
-            # ThunderSVM uses similar parameters; specify kernel and gamma
-            return ThunderSVC(
-                kernel=self.kernel,
-                C=self.C,
-                gamma=self.gamma if self.kernel != 'linear' else 'scale',
-                decision_function_shape='ovo',
-                cache_size=500,
-            )
-        else:
-            # Fallback to scikit-learn SVC
-            return SVC(
-                kernel=self.kernel,
-                C=self.C,
-                gamma=self.gamma if self.kernel != 'linear' else 'scale',
-                decision_function_shape='ovo',
-                cache_size=500,
-            )
+        """Construye SVC con los parámetros actuales."""
+        kwargs = dict(
+            kernel=self.kernel,
+            C=self.C,
+            gamma=self.gamma if self.kernel != 'linear' else 'scale',
+            decision_function_shape='ovo',
+            cache_size=500,
+            max_iter=self.max_iter,
+            tol=self.tol,
+        )
+        if USE_GPU_SVM and THUNDERSVM_AVAILABLE and ThunderSVC is not None:
+            return ThunderSVC(**kwargs)
+        return SVC(**kwargs)
+
 
     def optimizar_hiperparametros(
         self,
@@ -124,7 +125,8 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         else:
             param_grid = {'C': self.C_grid, 'gamma': self.gamma_grid}
 
-        svc = SVC(kernel=self.kernel, decision_function_shape='ovo', cache_size=500)
+        svc = SVC(kernel=self.kernel, decision_function_shape='ovo', cache_size=500,
+                  max_iter=self.max_iter, tol=self.tol)
         gs  = GridSearchCV(svc, param_grid, cv=self.cv_folds, scoring='accuracy',
                            n_jobs=-1, verbose=0)
         gs.fit(X_sc, y_train)
@@ -146,8 +148,30 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         self.modelo = self._construir_modelo()
         self.modelo.fit(X_sc, y_train)
 
+        # ── FLOPs analíticos SVM (OVO) ──────────────────────────────────
+        # Inferencia: para cada uno de los C(16,2)=120 clasificadores binarios,
+        # se evalúa el kernel sobre los SVs de ese clasificador.
+        # Kernel RBF: 2*d operaciones por SV (distancia euclidiana)
+        # Kernel Lineal: 2*d operaciones por SV (producto punto)
+        try:
+            n_sv_total = self.modelo.support_vectors_.shape[0]
+            d          = X_train.shape[1]
+            n_pares    = 120   # C(16,2) clasificadores OVO
+            # Aprox: distribución uniforme de SVs entre clasificadores
+            sv_por_par = n_sv_total / n_pares
+            self.flops_inferencia = float(2 * d * sv_por_par * n_pares)
+            self.n_parametros     = int(n_sv_total)
+            self.flops_tipo       = "estimado"
+            # Entrenamiento SVM: costo dominante = evaluaciones de kernel en SMO
+            # Aprox: n_sv * N * 2d (kernel entre SVs y muestras de entrenamiento)
+            N = X_train.shape[0]
+            self.flops_entrenamiento = float(n_sv_total * N * 2 * d)
+        except Exception as e:
+            print(f"  [{self.nombre}] [WARN] No se pudo estimar FLOPs: {e}")
+
         if self.guardar_modelo:
             self._guardar()
+
 
     def _predict_interno(self, X: np.ndarray) -> np.ndarray:
         X_sc = self.scaler.transform(X)
@@ -181,6 +205,8 @@ class ClasificadorSVM_RBF(_ClasificadorSVM_Base):
         dir_modelos:    str   = "modelos/",
         usar_cache:     bool  = True,
         dir_cache:      str   = "hiperparametros/",
+        max_iter:       int   = -1,
+        tol:            float = 1e-4,
     ):
         super().__init__(
             kernel='rbf', C=C, gamma=gamma,
@@ -189,6 +215,7 @@ class ClasificadorSVM_RBF(_ClasificadorSVM_Base):
             cv_folds=cv_folds, optimizar=optimizar,
             guardar_modelo=guardar_modelo, dir_modelos=dir_modelos,
             usar_cache=usar_cache, dir_cache=dir_cache,
+            max_iter=max_iter, tol=tol,
         )
 
     @property
@@ -212,6 +239,8 @@ class ClasificadorSVM_Lineal(_ClasificadorSVM_Base):
         dir_modelos:    str   = "modelos/",
         usar_cache:     bool  = True,
         dir_cache:      str   = "hiperparametros/",
+        max_iter:       int   = -1,
+        tol:            float = 1e-4,
     ):
         super().__init__(
             kernel='linear', C=C, gamma='scale',
@@ -220,6 +249,7 @@ class ClasificadorSVM_Lineal(_ClasificadorSVM_Base):
             cv_folds=cv_folds, optimizar=optimizar,
             guardar_modelo=guardar_modelo, dir_modelos=dir_modelos,
             usar_cache=usar_cache, dir_cache=dir_cache,
+            max_iter=max_iter, tol=tol,
         )
 
     @property

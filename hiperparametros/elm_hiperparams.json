@@ -1,9 +1,0 @@
-{
-  "params": {
-    "hidden_units": 500,
-    "C": 100.0,
-    "activation": "tanh"
-  },
-  "cv_accuracy": 0.9640799791708474,
-  "fecha": "2026-03-30 18:08:30"
-}

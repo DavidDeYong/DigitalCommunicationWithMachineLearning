@@ -44,6 +44,14 @@ from clasificadores.redes_neuronales import ClasificadorMLP, ClasificadorRedProf
 from clasificadores.elm_clf             import ClasificadorELM
 from clasificadores.sgd_nystroem        import ClasificadorSGDNystroem
 from clasificadores.logistic_regression import ClasificadorLogisticRegression
+try:
+    from clasificadores.xgboost_clf import ClasificadorXGBoost, _XGB_DISPONIBLE
+    _XGBOOST_DISPONIBLE = _XGB_DISPONIBLE
+except Exception:
+    _XGBOOST_DISPONIBLE = False
+if not _XGBOOST_DISPONIBLE:
+    print("[main] XGBoost no disponible. Instalar con: pip install xgboost")
+
 
 from metricas.metricas import (nuevo_registro_clasificador, registrar_punto,
                                 imprimir_resumen, construir_tabla_comparativa,
@@ -159,6 +167,8 @@ def construir_clasificadores() -> list:
             dir_modelos=config.DIR_MODELOS,
             usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
             dir_cache=config.DIR_HIPERPARAMETROS,
+            max_iter=config.SVM_MAX_ITER,
+            tol=config.SVM_TOL,
         ),
 
         ClasificadorSVM_Lineal(
@@ -170,6 +180,8 @@ def construir_clasificadores() -> list:
             dir_modelos=config.DIR_MODELOS,
             usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
             dir_cache=config.DIR_HIPERPARAMETROS,
+            max_iter=config.SVM_MAX_ITER,
+            tol=config.SVM_TOL,
         ),
 
         ClasificadorKNN(
@@ -180,6 +192,8 @@ def construir_clasificadores() -> list:
             dir_modelos=config.DIR_MODELOS,
             usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
             dir_cache=config.DIR_HIPERPARAMETROS,
+            max_train_samples=config.KNN_MAX_TRAIN_SAMPLES,
+            seed=config.SEED,
         ),
 
         ClasificadorRandomForest(
@@ -203,6 +217,8 @@ def construir_clasificadores() -> list:
             lr_patience=config.NN_MLP_LR_PATIENCE,
             lr_factor=config.NN_MLP_LR_FACTOR,
             lr_min=config.NN_MLP_LR_MIN,
+            early_stop_patience=config.NN_MLP_EARLY_STOP_PATIENCE,
+            early_stop_min_delta=config.NN_MLP_EARLY_STOP_MIN_DELTA,
             guardar_modelo=config.GUARDAR_MODELOS,
             dir_modelos=config.DIR_MODELOS,
             seed=config.SEED,
@@ -216,6 +232,8 @@ def construir_clasificadores() -> list:
             lr_patience=config.NN_DEEP_LR_PATIENCE,
             lr_factor=config.NN_DEEP_LR_FACTOR,
             lr_min=config.NN_DEEP_LR_MIN,
+            early_stop_patience=config.NN_DEEP_EARLY_STOP_PATIENCE,
+            early_stop_min_delta=config.NN_DEEP_EARLY_STOP_MIN_DELTA,
             guardar_modelo=config.GUARDAR_MODELOS,
             dir_modelos=config.DIR_MODELOS,
             seed=config.SEED,
@@ -224,6 +242,9 @@ def construir_clasificadores() -> list:
         ClasificadorSGDNystroem(
             n_components=config.SGD_N_COMPONENTS_DEFAULT,
             gamma=config.SGD_GAMMA_DEFAULT,
+            max_iter=config.SGD_MAX_ITER,
+            tol=config.SGD_TOL,
+            n_iter_no_change=config.SGD_N_ITER_NO_CHANGE,
             n_comp_grid=config.SGD_N_COMPONENTS_GRID,
             gamma_grid=config.SGD_GAMMA_GRID,
             optimizar=optimizar,
@@ -248,12 +269,37 @@ def construir_clasificadores() -> list:
             C_grid=config.LR_C_GRID,
             cv_folds=config.LR_CV_FOLDS,
             max_iter=config.LR_MAX_ITER,
+            tol=config.LR_TOL,
             optimizar=optimizar,
             usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
             dir_cache=config.DIR_HIPERPARAMETROS,
         ),
     ]
+
+    # XGBoost (opcional, sólo si está instalado)
+    if _XGBOOST_DISPONIBLE:
+        clfs.append(
+            ClasificadorXGBoost(
+                n_estimators      = config.XGB_N_ESTIMATORS_DEFAULT,
+                max_depth         = config.XGB_MAX_DEPTH_DEFAULT,
+                learning_rate     = config.XGB_LR_DEFAULT,
+                subsample         = config.XGB_SUBSAMPLE,
+                colsample_bytree  = config.XGB_COLSAMPLE,
+                early_stop_rounds = config.XGB_EARLY_STOPPING_ROUNDS,
+                n_est_grid        = config.XGB_N_ESTIMATORS_GRID,
+                max_depth_grid    = config.XGB_MAX_DEPTH_GRID,
+                lr_grid           = config.XGB_LR_GRID,
+                optimizar         = optimizar,
+                usar_cache        = config.USAR_CACHE_HIPERPARAMETROS,
+                dir_cache         = config.DIR_HIPERPARAMETROS,
+                guardar_modelo    = config.GUARDAR_MODELOS,
+                dir_modelos       = config.DIR_MODELOS,
+                seed              = config.SEED,
+            )
+        )
+
     return clfs
+
 
 
 
@@ -569,12 +615,30 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
 
     print(f"  σ = {sigma_opt:.5f} | N_train = {n_train_opt} símbolos")
 
+    # Submuestreo para la búsqueda de hiperparámetros: varios clasificadores
+    # (SVM-RBF es O(N^2); ELM construye H de N x L) agotan la memoria si el
+    # GridSearch corre sobre las 100k muestras en paralelo (BrokenProcessPool).
+    # Los hiperparámetros óptimos son robustos al tamaño de muestra, así que la
+    # optimización usa un subconjunto estratificado; el barrido posterior sí
+    # emplea N_train completo.
+    N_OPT_MAX = 10_000
+    if len(simbolos_rx_opt) > N_OPT_MAX:
+        from sklearn.model_selection import train_test_split
+        X_opt, _, y_opt, _ = train_test_split(
+            simbolos_rx_opt, etiquetas_tx_opt,
+            train_size=N_OPT_MAX, stratify=etiquetas_tx_opt,
+            random_state=config.SEED)
+        print(f"  [Optim] Submuestreo estratificado para GridSearch: "
+              f"{len(simbolos_rx_opt)} -> {len(X_opt)} muestras")
+    else:
+        X_opt, y_opt = simbolos_rx_opt, etiquetas_tx_opt
+
     hiperparams_globales = {}   # almacena los mejores params de cada clasificador
     for clf in clasificadores:
         if isinstance(clf, ClasificadorBayes):
             continue
         print(f"\n  → Optimizando: {clf.nombre}")
-        params = clf.optimizar_hiperparametros(simbolos_rx_opt, etiquetas_tx_opt)
+        params = clf.optimizar_hiperparametros(X_opt, y_opt)
         hiperparams_globales[clf.nombre] = params
 
     print(f"\n  ✓ Optimización completada. Iniciando barrido con hiperparámetros fijos.")
@@ -672,17 +736,25 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
 
             etiquetas_det = clf.predict(simbolos_rx_test)
             print(f"    t_inferencia_1  = {clf.tiempo_inferencia_unitaria*1e6:.4f} us")
+            if clf.flops_inferencia is not None:
+                print(f"    FLOPs/inferencia = {clf.flops_inferencia:,.0f} "
+                      f"[{clf.flops_tipo}]  |  parámetros = "
+                      f"{clf.n_parametros if clf.n_parametros is not None else 'N/A'}")
 
             registrar_punto(
-                registro         = reg,
-                Eb_N0_dB         = Eb_N0_dB,
-                bits_ref         = bits_test,
-                etiquetas_ref    = etiquetas_tx_test,
-                etiquetas_det    = etiquetas_det,
-                t_entrenamiento  = clf.tiempo_entrenamiento,
-                t_inferencia_1   = clf.tiempo_inferencia_unitaria,
-                mejores_params   = mejores_params,
-                n_test_simbolos  = n_test,
+                registro            = reg,
+                Eb_N0_dB            = Eb_N0_dB,
+                bits_ref            = bits_test,
+                etiquetas_ref       = etiquetas_tx_test,
+                etiquetas_det       = etiquetas_det,
+                t_entrenamiento     = clf.tiempo_entrenamiento,
+                t_inferencia_1      = clf.tiempo_inferencia_unitaria,
+                mejores_params      = mejores_params,
+                n_test_simbolos     = n_test,
+                flops_inferencia    = clf.flops_inferencia,
+                flops_entrenamiento = clf.flops_entrenamiento,
+                n_parametros        = clf.n_parametros,
+                flops_tipo          = clf.flops_tipo,
             )
 
             ber_actual  = reg['ber'][-1]

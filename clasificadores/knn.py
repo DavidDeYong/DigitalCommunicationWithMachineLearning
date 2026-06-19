@@ -28,6 +28,8 @@ class ClasificadorKNN(ClasificadorBase):
         dir_modelos:    str   = "modelos/",
         usar_cache:     bool  = True,
         dir_cache:      str   = "hiperparametros/",
+        max_train_samples: int = None,
+        seed:           int   = 42,
     ):
         """
         Parameters
@@ -38,6 +40,11 @@ class ClasificadorKNN(ClasificadorBase):
         optimizar   : si True, busca K óptimo automáticamente
         usar_cache  : si True, carga K óptimo desde cache si existe
         dir_cache   : directorio donde se guarda/lee el cache JSON
+        max_train_samples : si no es None y N_train lo supera, se aplica
+                      submuestreo ESTRATIFICADO por clase (instance selection).
+                      KNN es lazy: almacenar todo N_train es redundante cuando
+                      la accuracy ya saturó. Reduce memoria y operaciones.
+        seed        : semilla para el submuestreo (reproducibilidad)
         """
         super().__init__()
         self.k              = k
@@ -48,6 +55,8 @@ class ClasificadorKNN(ClasificadorBase):
         self.dir_modelos    = dir_modelos
         self.usar_cache     = usar_cache
         self.dir_cache      = dir_cache
+        self.max_train_samples = max_train_samples
+        self.seed           = seed
 
         self.modelo          = None
         self._mejores_params: dict = {}
@@ -112,9 +121,43 @@ class ClasificadorKNN(ClasificadorBase):
         """Nombre para el cache (sin el K actual, que puede cambiar)."""
         return "KNN" 
 
+    def _submuestrear_estratificado(self, X, y):
+        """
+        Submuestreo estratificado por clase a max_train_samples muestras.
+        Mantiene las proporciones de clase originales (con piloto equiprobable,
+        ~max_train_samples/16 por símbolo).
+        """
+        rng  = np.random.default_rng(self.seed)
+        frac = self.max_train_samples / len(X)
+        idx_sel = []
+        for c in np.unique(y):
+            idx_c = np.flatnonzero(y == c)
+            n_c   = max(1, int(round(len(idx_c) * frac)))
+            idx_sel.append(rng.choice(idx_c, size=n_c, replace=False))
+        idx_sel = np.concatenate(idx_sel)
+        print(f"  [KNN] Submuestreo estratificado: {len(X):,} → {len(idx_sel):,} "
+              f"muestras almacenadas")
+        return X[idx_sel], y[idx_sel]
+
     def _fit_interno(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
+        if (self.max_train_samples is not None
+                and len(X_train) > self.max_train_samples):
+            X_train, y_train = self._submuestrear_estratificado(X_train, y_train)
+
         self.modelo = KNeighborsClassifier(n_neighbors=self.k, n_jobs=-1)
         self.modelo.fit(X_train, y_train)
+
+        # ── FLOPs analíticos (estimado, cota de fuerza bruta) ────────────
+        # Inferencia: distancia euclidiana a las N_train muestras almacenadas
+        # → 3 ops por dimensión (resta, cuadrado, suma) por muestra.
+        # Nota: sklearn usa KD-tree/Ball-tree, que reduce el costo medio,
+        # pero la cota N×3d es la referencia estándar del algoritmo.
+        N, d = X_train.shape
+        self.flops_inferencia    = float(N * 3 * d)
+        self.n_parametros        = int(N * d)   # muestras almacenadas
+        self.flops_tipo          = "estimado"
+        # KNN no tiene entrenamiento real: solo copia datos en memoria
+        self.flops_entrenamiento = float(N * d)
 
         if self.guardar_modelo:
             self._guardar()

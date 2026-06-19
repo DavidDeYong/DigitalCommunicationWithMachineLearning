@@ -1,9 +1,9 @@
 {
   "clasificador": "SVM RBF",
-  "fecha": "2026-02-20 18:39:37",
+  "fecha": "2026-06-18 17:07:36",
   "params": {
-    "C": 1,
-    "gamma": "scale"
+    "C": 100,
+    "gamma": 0.1
   },
-  "cv_accuracy": 0.96427
+  "cv_accuracy": 0.9621999999999999
 }

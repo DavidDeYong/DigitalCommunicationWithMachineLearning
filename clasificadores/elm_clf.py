@@ -317,8 +317,26 @@ class ClasificadorELM(ClasificadorBase):
         )
         self._modelo.fit(np.asarray(X_train, dtype=np.float64),
                          np.asarray(y_train, dtype=np.int32))
+
+        # ── FLOPs analíticos ──────────────────────────────────────────
+        # Inferencia ELM: H = act(X·W^T + b)  → L·d  MACs
+        #                 y = argmax(H·beta)   → L·n_classes MACs
+        n_features  = X_train.shape[1]
+        n_classes   = int(y_train.max()) + 1
+        L           = self.hidden_units
+        # Factor 2: multiply + add por cada MAC
+        self.flops_inferencia = float(2 * L * n_features + 2 * L * n_classes)
+        self.n_parametros     = int(L * n_features + L + L * n_classes)  # W + b + beta
+        self.flops_tipo       = "estimado"
+        # Entrenamiento ELM: proyección aleatoria (N×H×d MACs) + pseudoinversa (N×H^2 + H^3)
+        N = X_train.shape[0]
+        flops_proy   = 2 * N * L * n_features   # H = W·X^T
+        flops_pinv   = N * L * L + L * L * L    # H^T H (N×H^2) + factorización (H^3)
+        self.flops_entrenamiento = float(flops_proy + flops_pinv)
+
         if self.guardar_modelo:
             self._guardar()
+
 
     def _predict_interno(self, X):
         return self._modelo.predict(np.asarray(X, dtype=np.float64))
@@ -335,8 +353,9 @@ class ClasificadorELM(ClasificadorBase):
                     params  = datos.get("params", {})
                     acc     = datos.get("cv_accuracy")
                     fecha   = datos.get("fecha", "?")
+                    acc_str = f"{acc:.4f}" if acc is not None else "N/A"
                     print(f"  [Cache] ELM-{self.init_strategy}: {params} "
-                          f"CV={acc:.4f if acc else 'N/A'} ({fecha})")
+                          f"CV={acc_str} ({fecha})")
                     self._aplicar_params(params)
                     self._mejores_params = params
                     return params
