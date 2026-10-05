@@ -37,6 +37,8 @@ from canal.canal_awgn     import transmitir, ber_teorica_16qam
 from validacion.validacion import validar_simulador
 
 from clasificadores.bayes          import ClasificadorBayes
+from clasificadores.bayes_fase     import ClasificadorBayesFase
+from clasificadores.genie_map      import ClasificadorGenieMAP
 from clasificadores.svm            import ClasificadorSVM_RBF, ClasificadorSVM_Lineal
 from clasificadores.knn            import ClasificadorKNN
 from clasificadores.random_forest  import ClasificadorRandomForest
@@ -157,7 +159,15 @@ def construir_clasificadores() -> list:
 
     clfs = [
         ClasificadorBayes(),
+    ]
 
+    if config.ESCENARIO in ['S2', 'S3']:
+        clfs.append(ClasificadorBayesFase())
+
+    if config.ESCENARIO == 'S3':
+        clfs.append(ClasificadorGenieMAP(sigma_phi_deg=config.SIGMA_PHI_DEG))
+
+    clfs.extend([
         ClasificadorSVM_RBF(
             C=config.SVM_C_DEFAULT, gamma=config.SVM_GAMMA_DEFAULT,
             C_grid=config.SVM_C_GRID, gamma_grid=config.SVM_GAMMA_GRID,
@@ -169,6 +179,8 @@ def construir_clasificadores() -> list:
             dir_cache=config.DIR_HIPERPARAMETROS,
             max_iter=config.SVM_MAX_ITER,
             tol=config.SVM_TOL,
+            max_train_samples=config.SVM_MAX_TRAIN_SAMPLES,
+            seed=config.SEED,
         ),
 
         ClasificadorSVM_Lineal(
@@ -182,6 +194,8 @@ def construir_clasificadores() -> list:
             dir_cache=config.DIR_HIPERPARAMETROS,
             max_iter=config.SVM_MAX_ITER,
             tol=config.SVM_TOL,
+            max_train_samples=config.SVM_MAX_TRAIN_SAMPLES,
+            seed=config.SEED,
         ),
 
         ClasificadorKNN(
@@ -274,7 +288,7 @@ def construir_clasificadores() -> list:
             usar_cache=config.USAR_CACHE_HIPERPARAMETROS,
             dir_cache=config.DIR_HIPERPARAMETROS,
         ),
-    ]
+    ])
 
     # XGBoost (opcional, sólo si está instalado)
     if _XGBOOST_DISPONIBLE:
@@ -611,7 +625,16 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
                            scrambling_poly=config.SCRAMBLING_POLY)
     simbolos_tx_opt   = modular(bits_train_opt, A=A)
     etiquetas_tx_opt  = simbolos_a_etiquetas(simbolos_tx_opt, A=A)
-    simbolos_rx_opt, sigma_opt = transmitir(simbolos_tx_opt, Eb_N0_opt, A, rng)
+    
+    phi_e = 0.0
+    sigma_phi = 0.0
+    if getattr(config, 'ESCENARIO', 'S1') == 'S2':
+        phi_e = config.PHI_E_DEG
+    elif getattr(config, 'ESCENARIO', 'S1') == 'S3':
+        sigma_phi = config.SIGMA_PHI_DEG
+        
+    simbolos_rx_opt, sigma_opt = transmitir(simbolos_tx_opt, Eb_N0_opt, A, rng, 
+                                            phi_e_deg=phi_e, sigma_phi_deg=sigma_phi)
 
     print(f"  σ = {sigma_opt:.5f} | N_train = {n_train_opt} símbolos")
 
@@ -635,7 +658,7 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
 
     hiperparams_globales = {}   # almacena los mejores params de cada clasificador
     for clf in clasificadores:
-        if isinstance(clf, ClasificadorBayes):
+        if isinstance(clf, (ClasificadorBayes, ClasificadorBayesFase, ClasificadorGenieMAP)):
             continue
         print(f"\n  → Optimizando: {clf.nombre}")
         params = clf.optimizar_hiperparametros(X_opt, y_opt)
@@ -710,9 +733,11 @@ def paso_benchmark(fuente: dict, clasificadores: list) -> list:
         etiquetas_tx_train = simbolos_a_etiquetas(simbolos_tx_train, A=A)
         etiquetas_tx_test  = simbolos_a_etiquetas(simbolos_tx_test,  A=A)
 
-        # ── Canal AWGN ────────────────────────────────────────────────────
-        simbolos_rx_train, sigma = transmitir(simbolos_tx_train, Eb_N0_dB, A, rng)
-        simbolos_rx_test,  _     = transmitir(simbolos_tx_test,  Eb_N0_dB, A, rng)
+        # ── Canal AWGN + Fase ──────────────────────────────────────────────────
+        simbolos_rx_train, sigma = transmitir(simbolos_tx_train, Eb_N0_dB, A, rng,
+                                              phi_e_deg=phi_e, sigma_phi_deg=sigma_phi)
+        simbolos_rx_test,  _     = transmitir(simbolos_tx_test,  Eb_N0_dB, A, rng,
+                                              phi_e_deg=phi_e, sigma_phi_deg=sigma_phi)
 
         conf_str = "confiable" if es_confiable_esperado else \
                    f"INSUFICIENTE (necesita {n_test_ideal:,})"

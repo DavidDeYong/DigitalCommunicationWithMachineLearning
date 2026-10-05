@@ -47,7 +47,8 @@ import os, json
 import numpy as np
 from datetime import datetime
 
-NOMBRE_ARCHIVO = "resultados_benchmark.json"
+import config
+NOMBRE_ARCHIVO = f"resultados_benchmark_{config.ESCENARIO}.json"
 
 
 # ---------------------------------------------------------------------------

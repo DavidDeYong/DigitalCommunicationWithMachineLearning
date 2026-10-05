@@ -41,8 +41,7 @@ import main as main_script
 # Útil para reproducir un conjunto previo (p.ej. las 11 semillas del artículo)
 # y comparar pre/post-fix de configuración punto a punto.
 # Dejar como [] para volver al comportamiento aleatorio interactivo.
-SEEDS_FIJAS = [58407, 82779, 76075, 27440, 61732, 85829,
-               76296, 62105, 64731, 12343, 68651]
+SEEDS_FIJAS = [58407, 82779, 76075, 27440, 61732, 85829, 76296, 62105, 64731, 12343, 68651]
 
 def update_config_seed(new_seed):
     """Actualiza el valor de SEED en config.py mediante expresiones regulares"""
@@ -273,9 +272,10 @@ def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     result_dir = os.path.join(base_dir, "resultados")
     # Reanudar tras interrupción: omitir las semillas que YA están presentes
-    # en el JSON único (resultados_benchmark.json), donde main.py acumula
+    # en el JSON único (resultados_benchmark_SX.json), donde main.py acumula
     # todas las corridas del lote.
-    json_unico = os.path.join(result_dir, "resultados_benchmark.json")
+    importlib.reload(config)
+    json_unico = os.path.join(result_dir, f"resultados_benchmark_{config.ESCENARIO}.json")
     seeds_existentes = set()
     if os.path.exists(json_unico):
         try:

@@ -59,6 +59,8 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         dir_cache:          str  = "hiperparametros/",
         max_iter:           int  = -1,      # -1 = sin límite (comportamiento sklearn por defecto)
         tol:                float = 1e-4,   # tolerancia de convergencia
+        max_train_samples:  int  = None,
+        seed:               int  = 42,
     ):
         super().__init__()
         self.kernel         = kernel
@@ -74,6 +76,8 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         self.dir_cache      = dir_cache
         self.max_iter       = max_iter
         self.tol            = tol
+        self.max_train_samples = max_train_samples
+        self.seed           = seed
 
         self.scaler = StandardScaler()
         self.modelo = None
@@ -144,9 +148,20 @@ class _ClasificadorSVM_Base(ClasificadorBase):
         return self._mejores_params
 
     def _fit_interno(self, X_train: np.ndarray, y_train: np.ndarray) -> None:
-        X_sc        = self.scaler.fit_transform(X_train)
+        if self.max_train_samples is not None and len(X_train) > self.max_train_samples:
+            from sklearn.model_selection import train_test_split
+            X_fit, _, y_fit, _ = train_test_split(
+                X_train, y_train,
+                train_size=self.max_train_samples,
+                stratify=y_train,
+                random_state=self.seed
+            )
+        else:
+            X_fit, y_fit = X_train, y_train
+
+        X_sc        = self.scaler.fit_transform(X_fit)
         self.modelo = self._construir_modelo()
-        self.modelo.fit(X_sc, y_train)
+        self.modelo.fit(X_sc, y_fit)
 
         # ── FLOPs analíticos SVM (OVO) ──────────────────────────────────
         # Inferencia: para cada uno de los C(16,2)=120 clasificadores binarios,
@@ -207,6 +222,8 @@ class ClasificadorSVM_RBF(_ClasificadorSVM_Base):
         dir_cache:      str   = "hiperparametros/",
         max_iter:       int   = -1,
         tol:            float = 1e-4,
+        max_train_samples: int = None,
+        seed:           int   = 42,
     ):
         super().__init__(
             kernel='rbf', C=C, gamma=gamma,
@@ -216,6 +233,7 @@ class ClasificadorSVM_RBF(_ClasificadorSVM_Base):
             guardar_modelo=guardar_modelo, dir_modelos=dir_modelos,
             usar_cache=usar_cache, dir_cache=dir_cache,
             max_iter=max_iter, tol=tol,
+            max_train_samples=max_train_samples, seed=seed,
         )
 
     @property
@@ -241,6 +259,8 @@ class ClasificadorSVM_Lineal(_ClasificadorSVM_Base):
         dir_cache:      str   = "hiperparametros/",
         max_iter:       int   = -1,
         tol:            float = 1e-4,
+        max_train_samples: int = None,
+        seed:           int   = 42,
     ):
         super().__init__(
             kernel='linear', C=C, gamma='scale',
@@ -250,6 +270,7 @@ class ClasificadorSVM_Lineal(_ClasificadorSVM_Base):
             guardar_modelo=guardar_modelo, dir_modelos=dir_modelos,
             usar_cache=usar_cache, dir_cache=dir_cache,
             max_iter=max_iter, tol=tol,
+            max_train_samples=max_train_samples, seed=seed,
         )
 
     @property

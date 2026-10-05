@@ -15,6 +15,21 @@ BITS_CUANT      = 8             # Bits de cuantificación → 256 niveles → 4 
 FS_RESAMPLE     = 44100         # Frecuencia de muestreo objetivo (Hz)
 
 # ---------------------------------------------------------------------------
+# ESCENARIOS DE CANAL (Fase de Referencia y Sincronismo)
+# ---------------------------------------------------------------------------
+# ESCENARIO define el modelo de canal a utilizar:
+# 'S1' : Canal AWGN ideal. Sincronismo perfecto de fase.
+# 'S2' : Canal AWGN + Error de fase estático constante. Desajuste fijo del oscilador local.
+# 'S3' : Canal AWGN + Ruido de fase estocástico (caminata aleatoria de Wiener).
+ESCENARIO = 'S3'
+
+# Parámetro para Escenario S2: Error de fase estático constante en grados.
+PHI_E_DEG = 10.0
+
+# Parámetro para Escenario S3: Desviación estándar del incremento del ruido de fase por símbolo en grados.
+SIGMA_PHI_DEG = 12.0
+
+# ---------------------------------------------------------------------------
 # MODULACIÓN
 # ---------------------------------------------------------------------------
 # 16-QAM: 4 bits por símbolo, constelación en plano I/Q con mapeo Gray
@@ -80,6 +95,7 @@ SVM_GAMMA_GRID    = [0.1, 1, 'scale']      # gamma=0.01 (kernel muy ancho) exclu
 SVM_CV_FOLDS      = 5
 SVM_MAX_ITER      = 50000   # límite de iteraciones SMO; evita tiempos excesivos a bajo Eb/N0
 SVM_TOL           = 1e-3    # tolerancia de convergencia — más relajada es aceptable donde BER≈0.5
+SVM_MAX_TRAIN_SAMPLES = 20_000 # Submuestreo para evitar O(N^3) en CPU
 
 # KNN
 KNN_K_DEFAULT = 15

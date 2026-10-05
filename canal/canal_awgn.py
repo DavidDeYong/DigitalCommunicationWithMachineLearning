@@ -88,29 +88,97 @@ def agregar_ruido(simbolos_tx: np.ndarray, sigma: float, rng: np.random.Generato
     return simbolos_tx + ruido
 
 
-def transmitir(
+def rotar_constelacion(simbolos: np.ndarray, angulo_rad: np.ndarray | float) -> np.ndarray:
+    """
+    Aplica una rotación ortogonal en el plano I/Q a los símbolos.
+    
+    Parameters
+    ----------
+    simbolos   : np.ndarray float64, shape (N, 2)
+    angulo_rad : float o np.ndarray de shape (N,)
+                 Si es escalar: rotación rígida constante (S2).
+                 Si es array (N,): rotación estocástica independiente por símbolo (S3).
+
+    Returns
+    -------
+    simbolos_rot : np.ndarray float64, shape (N, 2)
+    """
+    cos_th = np.cos(angulo_rad)
+    sin_th = np.sin(angulo_rad)
+    I_rot = simbolos[:, 0] * cos_th - simbolos[:, 1] * sin_th
+    Q_rot = simbolos[:, 0] * sin_th + simbolos[:, 1] * cos_th
+    return np.column_stack((I_rot, Q_rot))
+
+
+def aplicar_error_fase_estatico(simbolos_tx: np.ndarray, phi_e_deg: float) -> np.ndarray:
+    """
+    Aplica una desalineación angular de portadora estática constante phi_e_deg [Escenario S2].
+    """
+    if phi_e_deg == 0.0:
+        return simbolos_tx
+    return rotar_constelacion(simbolos_tx, np.radians(phi_e_deg))
+
+
+def aplicar_ruido_fase_estocastico(
     simbolos_tx: np.ndarray,
-    Eb_N0_dB:    float,
-    A:           float,
-    rng:         np.random.Generator
+    sigma_phi_deg: float,
+    rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Aplica ruido de fase estocástico gaussiano i.i.d. por símbolo [Escenario S3].
+    
+    phi_k ~ N(0, sigma_phi^2)
+
+    Returns
+    -------
+    simbolos_rot : np.ndarray float64, shape (N, 2)
+    phi_k_rad    : np.ndarray float64, shape (N,) — realizaciones de fase aplicadas
+    """
+    if sigma_phi_deg <= 0.0:
+        return simbolos_tx, np.zeros(len(simbolos_tx), dtype=np.float64)
+    phi_k = rng.normal(0.0, np.radians(sigma_phi_deg), size=len(simbolos_tx))
+    simbolos_rot = rotar_constelacion(simbolos_tx, phi_k)
+    return simbolos_rot, phi_k
+
+
+def transmitir(
+    simbolos_tx:   np.ndarray,
+    Eb_N0_dB:      float,
+    A:             float,
+    rng:           np.random.Generator,
+    phi_e_deg:     float = 0.0,
+    sigma_phi_deg: float = 0.0,
 ) -> tuple[np.ndarray, float]:
     """
-    Pipeline completo del canal: calcula σ y agrega ruido.
+    Pipeline completo del canal:
+      1. Aplica error de fase estático phi_e_deg (si != 0) [Escenario S2]
+      2. Aplica ruido de fase estocástico sigma_phi_deg (si != 0) [Escenario S3]
+      3. Agrega ruido térmico AWGN según Eb_N0_dB y amplitud A [Escenarios S1, S2, S3]
+
+    Si phi_e_deg=0 y sigma_phi_deg=0, reproduce idénticamente el canal AWGN puro (S1).
 
     Parameters
     ----------
-    simbolos_tx : np.ndarray, shape (N, 2)
-    Eb_N0_dB    : float   — punto del barrido
-    A           : float   — amplitud de la constelación
-    rng         : np.random.Generator
+    simbolos_tx   : np.ndarray, shape (N, 2)
+    Eb_N0_dB      : float   — punto del barrido
+    A             : float   — amplitud de la constelación
+    rng           : np.random.Generator
+    phi_e_deg     : float   — error de fase estático en grados (default: 0.0)
+    sigma_phi_deg : float   — desviación estándar de ruido de fase en grados (default: 0.0)
 
     Returns
     -------
     simbolos_rx : np.ndarray, shape (N, 2)
-    sigma       : float   — sigma usado (para referencia)
+    sigma       : float   — sigma del ruido térmico AWGN usado
     """
+    simbolos_mod = simbolos_tx
+    if phi_e_deg != 0.0:
+        simbolos_mod = aplicar_error_fase_estatico(simbolos_mod, phi_e_deg)
+    if sigma_phi_deg > 0.0:
+        simbolos_mod, _ = aplicar_ruido_fase_estocastico(simbolos_mod, sigma_phi_deg, rng)
+
     sigma       = calcular_sigma(Eb_N0_dB, A)
-    simbolos_rx = agregar_ruido(simbolos_tx, sigma, rng)
+    simbolos_rx = agregar_ruido(simbolos_mod, sigma, rng)
     return simbolos_rx, sigma
 
 
